@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (.NET) build + tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Integration tests build their connection string from this (see .env.example).
+      POSTGRES_PASSWORD: postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore MoneyManagement.slnx
+
+      - name: Build
+        run: dotnet build MoneyManagement.slnx --no-restore
+
+      # Api.Tests boots the real app, which runs ApplyMigrations() (creates +
+      # migrates the throwaway money_management_inttest DB) and the seeders.
+      # Running it first leaves the shared DB ready for the Infrastructure suite —
+      # the same ordering that makes a fresh local run pass.
+      - name: "Tests — Api (provisions the integration DB)"
+        run: dotnet test tests/MoneyManagement.Api.Tests/MoneyManagement.Api.Tests.csproj --no-build --verbosity normal
+
+      - name: "Tests — Infrastructure (integration)"
+        run: dotnet test tests/MoneyManagement.Infrastructure.Tests/MoneyManagement.Infrastructure.Tests.csproj --no-build --verbosity normal
+
+      - name: "Tests — Domain + Application (no DB)"
+        run: |
+          dotnet test tests/MoneyManagement.Domain.Tests/MoneyManagement.Domain.Tests.csproj --no-build --verbosity normal
+          dotnet test tests/MoneyManagement.Application.Tests/MoneyManagement.Application.Tests.csproj --no-build --verbosity normal
+
+  frontend:
+    name: Frontend (web) tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Test
+        run: npm test

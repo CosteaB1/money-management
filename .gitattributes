@@ -1,0 +1,14 @@
+# Normalize line endings: store text as LF in the repo, convert to the platform's
+# native ending on checkout. Stops the "LF will be replaced by CRLF" churn.
+* text=auto
+
+# Windows-only scripts keep CRLF.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary assets — never normalize or text-diff.
+*.png binary
+*.jpg binary
+*.pdf binary
+*.ico binary
