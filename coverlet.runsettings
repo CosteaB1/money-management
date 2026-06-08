@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  Coverage configuration for the backend solution.
+
+  Goal: 100% LINE coverage of HAND-WRITTEN executable code.
+  Branch coverage is intentionally NOT gated (we do not chase branch arms).
+
+  Everything excluded here is either compiler/source-generator output or a
+  hand-written class that cannot be exercised by a test in this environment.
+  Each exclusion is justified in COVERAGE.md ("Coverage exclusions").
+
+  NOTE: the generated [GeneratedRegex] / OpenAPI source-generator output is
+  filtered at the reportgenerator stage (classfilters/filefilters in the
+  coverage scripts) rather than here, because coverlet's ExcludeByAttribute
+  does not reliably match the regex runner classes and the broad
+  CompilerGenerated/ExcludeFromCodeCoverage attribute filters also strip
+  hand-written async/record members. See COVERAGE.md.
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+
+          <!--
+            LINE-coverage gate (line only — branch is never gated). This is a
+            best-effort signal at the collector level; the authoritative gate is
+            scripts/check-coverage.ps1 run against the filtered reportgenerator
+            summary (the collector cannot apply the generated-code class filters,
+            so its raw number is lower than the documented hand-written number).
+            See COVERAGE.md.
+          -->
+          <Threshold>99</Threshold>
+          <ThresholdType>line</ThresholdType>
+          <ThresholdStat>total</ThresholdStat>
+
+          <!--
+            Only the production assemblies are part of the coverage denominator.
+            Test assemblies and third-party code are excluded.
+          -->
+          <Include>
+            [MoneyManagement.Api]*
+            [MoneyManagement.Application]*
+            [MoneyManagement.Domain]*
+            [MoneyManagement.Infrastructure]*
+            [MoneyManagement.SharedKernel]*
+          </Include>
+
+          <!--
+            Hand-written, genuinely-untestable classes are marked with
+            [ExcludeFromCodeCoverage] at the source (each justified inline and
+            in COVERAGE.md). Honour that attribute. We deliberately do NOT add
+            CompilerGeneratedAttribute here: it would also strip covered
+            hand-written async-state-machine / record / iterator members.
+          -->
+          <ExcludeByAttribute>
+            ExcludeFromCodeCoverageAttribute
+          </ExcludeByAttribute>
+
+          <!-- Generated EF migrations, the model snapshot, and any *.Designer.cs. -->
+          <ExcludeByFile>
+            **/Migrations/**
+            **/*ApplicationDbContextModelSnapshot*
+            **/*.Designer.cs
+          </ExcludeByFile>
+
+          <SkipAutoProps>false</SkipAutoProps>
+          <UseSourceLink>false</UseSourceLink>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:17
+    container_name: money-management-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your .env file}
+      POSTGRES_DB: money_management
+    ports:
+      - "5432:5432"
+    volumes:
+      - mm_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d money_management"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mm_pgdata:

@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <!-- The audit interceptor sets CreatedAt/UpdatedAt via internal setters. -->
+    <InternalsVisibleTo Include="MoneyManagement.Infrastructure" />
+    <!-- Read-side tests seed CreatedAt directly (no interceptor runs in unit tests). -->
+    <InternalsVisibleTo Include="MoneyManagement.Application.Tests" />
+  </ItemGroup>
+</Project>

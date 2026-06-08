@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\MoneyManagement.SharedKernel\MoneyManagement.SharedKernel.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The audit interceptor sets CreatedAt/UpdatedAt via internal setters. -->
+    <InternalsVisibleTo Include="MoneyManagement.Infrastructure" />
+    <InternalsVisibleTo Include="MoneyManagement.Domain.Tests" />
+  </ItemGroup>
+</Project>

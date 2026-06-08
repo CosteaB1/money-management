@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Standalone console tool that mints the two SYNTHETIC maib statement PDF
+    fixtures used by the parser tests. Deliberately NOT part of
+    MoneyManagement.slnx and NOT referenced by any shipped src/ or test
+    project, so QuestPDF never enters the application's dependency graph.
+
+    Regenerate the fixtures by running this project from the repo root:
+      dotnet run (project tools/MaibFixtureGenerator)
+    It writes maib_sample.pdf and maib_salary_with_commission.pdf into BOTH
+    the Application.Tests and Infrastructure.Tests Fixtures folders, then
+    re-parses each with the real MaibStatementParser to self-verify.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="QuestPDF" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\MoneyManagement.Infrastructure\MoneyManagement.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\MoneyManagement.Domain\MoneyManagement.Domain.csproj" />
+    <ProjectReference Include="..\..\src\MoneyManagement.SharedKernel\MoneyManagement.SharedKernel.csproj" />
+  </ItemGroup>
+
+</Project>

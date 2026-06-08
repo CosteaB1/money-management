@@ -1,0 +1,24 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+    <File Path=".gitignore" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="WIKI.md" />
+    <File Path="BACKEND.md" />
+    <File Path="FRONTEND.md" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/MoneyManagement.Api/MoneyManagement.Api.csproj" />
+    <Project Path="src/MoneyManagement.Application/MoneyManagement.Application.csproj" />
+    <Project Path="src/MoneyManagement.Domain/MoneyManagement.Domain.csproj" />
+    <Project Path="src/MoneyManagement.Infrastructure/MoneyManagement.Infrastructure.csproj" />
+    <Project Path="src/MoneyManagement.SharedKernel/MoneyManagement.SharedKernel.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MoneyManagement.Api.Tests/MoneyManagement.Api.Tests.csproj" />
+    <Project Path="tests/MoneyManagement.Application.Tests/MoneyManagement.Application.Tests.csproj" />
+    <Project Path="tests/MoneyManagement.Domain.Tests/MoneyManagement.Domain.Tests.csproj" />
+    <Project Path="tests/MoneyManagement.Infrastructure.Tests/MoneyManagement.Infrastructure.Tests.csproj" />
+  </Folder>
+</Solution>

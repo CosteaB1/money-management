@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Money Management">
+  <rect width="32" height="32" rx="7" fill="#0f766e" />
+  <circle cx="16" cy="16" r="9" fill="none" stroke="#5eead4" stroke-width="2" />
+  <path
+    d="M19 12.5c-.6-1-1.8-1.6-3-1.6-1.9 0-3.2 1-3.2 2.4 0 3.4 6.6 1.8 6.6 5.2 0 1.5-1.5 2.6-3.4 2.6-1.4 0-2.7-.6-3.3-1.7M16 9.5v13"
+    fill="none"
+    stroke="#f0fdfa"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

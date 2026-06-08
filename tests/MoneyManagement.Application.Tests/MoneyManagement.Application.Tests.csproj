@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\MoneyManagement.Application\MoneyManagement.Application.csproj" />
+    <ProjectReference Include="..\..\src\MoneyManagement.Domain\MoneyManagement.Domain.csproj" />
+    <ProjectReference Include="..\..\src\MoneyManagement.Infrastructure\MoneyManagement.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\MoneyManagement.SharedKernel\MoneyManagement.SharedKernel.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="NSubstitute" />
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Imports\Fixtures\maib_sample.pdf" />
+    <EmbeddedResource Include="Imports\Fixtures\maib_salary_with_commission.pdf" />
+  </ItemGroup>
+</Project>

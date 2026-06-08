@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup>  <UserSecretsId>20f5ff49-2f74-4945-b9cf-6b8c8abae6e0</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="MoneyManagement.Api.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MoneyManagement.Application\MoneyManagement.Application.csproj" />
+    <ProjectReference Include="..\MoneyManagement.Domain\MoneyManagement.Domain.csproj" />
+    <ProjectReference Include="..\MoneyManagement.Infrastructure\MoneyManagement.Infrastructure.csproj" />
+    <ProjectReference Include="..\MoneyManagement.SharedKernel\MoneyManagement.SharedKernel.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Scalar.AspNetCore" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="AspNetCore.HealthChecks.NpgSql" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+</Project>
