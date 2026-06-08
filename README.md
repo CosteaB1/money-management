@@ -14,6 +14,10 @@ Track multi-currency accounts, import real bank statements, budget, set savings 
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
 ![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
 
+<br />
+
+<img src="docs/screenshots/dashboard.png" alt="Money Management dashboard" width="880" />
+
 </div>
 
 > [!WARNING]
@@ -33,14 +37,12 @@ Track multi-currency accounts, import real bank statements, budget, set savings 
 
 ## Screenshots
 
-<div align="center">
-
-<!-- Replace these with richer captures (dashboard, transactions, import preview). -->
-
-
-</div>
-
-> 📸 More screenshots (dashboard, statement import, budgets) coming — the empty state above is a placeholder.
+|  |  |
+|:---:|:---:|
+| **Accounts** | **Transactions** |
+| <img src="docs/screenshots/accounts.png" alt="Accounts" width="430" /> | <img src="docs/screenshots/transactions.png" alt="Transactions" width="430" /> |
+| **Budgets** | **Statement import** |
+| <img src="docs/screenshots/budgets.png" alt="Budgets" width="430" /> | <img src="docs/screenshots/import.png" alt="Statement import preview" width="430" /> |
 
 ## Features
 
