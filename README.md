@@ -37,7 +37,6 @@ Track multi-currency accounts, import real bank statements, budget, set savings 
 
 <!-- Replace these with richer captures (dashboard, transactions, import preview). -->
 
-![Accounts](./accounts-empty-state.png)
 
 </div>
 
