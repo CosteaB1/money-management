@@ -96,6 +96,22 @@ describe('PerformanceCard', () => {
     expect(pnl.querySelector('.text-muted-foreground')).not.toBeNull();
   });
 
+  it('hides the Net P&L cell for Cash accounts (value can never drift)', () => {
+    const cashAccount: AccountDetailDto = { ...baseAccount, type: 'Cash' };
+    render(<PerformanceCard account={cashAccount} />);
+
+    // Contributions / Withdrawals stay — transfers are meaningful for cash.
+    expect(screen.getByTestId('perf-contributions')).toBeInTheDocument();
+    expect(screen.getByTestId('perf-withdrawals')).toBeInTheDocument();
+    // Net P&L is structurally always 0 for Cash → omitted entirely.
+    expect(screen.queryByTestId('perf-pnl')).not.toBeInTheDocument();
+  });
+
+  it('keeps the Net P&L cell for investment accounts', () => {
+    render(<PerformanceCard account={{ ...baseAccount, type: 'Brokerage' }} />);
+    expect(screen.getByTestId('perf-pnl')).toBeInTheDocument();
+  });
+
   it('surfaces the missing-FX warning when totals.missingFxRate is true', () => {
     const missing: AccountDetailDto = {
       ...baseAccount,

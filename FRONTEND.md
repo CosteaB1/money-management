@@ -117,6 +117,8 @@ src/
                                  # +Contributions / −Withdrawals / ±Net P&L plus Current value
                                  # line; the opening balance lives in the Activity list now, not
                                  # here; YTD ↔ All-time toggle swaps only the activity totals;
+                                 # the Net P&L cell is hidden for Cash accounts — value can never
+                                 # drift, so the total is structurally 0; grid collapses to 2 cols;
                                  # output missing-FX warning), balance-trend-
                                  # card (Recharts line + Daily/Weekly/Monthly interval Select,
                                  # window scales 30d/3mo/6mo with the interval, sr-only points

@@ -55,6 +55,13 @@ export function PerformanceCard({ account }: Props) {
 
   const showMdl = account.currency !== 'MDL';
 
+  // Net P&L only has meaning for accounts whose value can drift (investment
+  // types — Brokerage, Crypto, P2P, BankDeposit), which are the only types
+  // that can receive balance adjustments. Cash can never be adjusted, so its
+  // Net P&L is structurally always 0 — hide the cell rather than show a dead
+  // zero. Starting with Cash; other non-investment types may follow.
+  const showPnL = account.type !== 'Cash';
+
   return (
     <Card data-testid="performance-card" data-window={window}>
       <CardHeader className="flex flex-row items-center justify-between gap-3 pb-3">
@@ -79,7 +86,7 @@ export function PerformanceCard({ account }: Props) {
         </Tabs>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+        <div className={cn('grid grid-cols-2 gap-4', showPnL && 'md:grid-cols-3')}>
           <Cell
             label="+ Contributions"
             value={formatMoney(totals.contributionsMdl, 'MDL')}
@@ -98,15 +105,17 @@ export function PerformanceCard({ account }: Props) {
             testId="perf-withdrawals"
             valueClassName="text-rose-500"
           />
-          <Cell
-            label="Net P&L"
-            value={formatMoney(totals.netPnLMdl, 'MDL')}
-            subtitle={`${totals.adjustmentCount} ${
-              totals.adjustmentCount === 1 ? 'update' : 'updates'
-            }`}
-            testId="perf-pnl"
-            valueClassName={pnlClass(totals.netPnLMdl)}
-          />
+          {showPnL && (
+            <Cell
+              label="Net P&L"
+              value={formatMoney(totals.netPnLMdl, 'MDL')}
+              subtitle={`${totals.adjustmentCount} ${
+                totals.adjustmentCount === 1 ? 'update' : 'updates'
+              }`}
+              testId="perf-pnl"
+              valueClassName={pnlClass(totals.netPnLMdl)}
+            />
+          )}
         </div>
 
         <div
