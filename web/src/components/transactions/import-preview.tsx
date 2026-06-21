@@ -1,6 +1,6 @@
 'use client';
 
-import { Building2, StickyNote } from 'lucide-react';
+import { Building2, StickyNote, TriangleAlert } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { type Dispatch, memo, useCallback, useMemo, useReducer, useState } from 'react';
@@ -684,6 +684,36 @@ export function ImportPreview({ preview, accountId, fileName, onCancel }: Props)
           Opening + In − Out = {formatMoney(rowCheck.balance, accountCurrency)}
         </p>
       </div>
+
+      {/* Opening-balance reconciliation banner (Phase 1). Non-blocking: shown
+          only when the backend reports the statement's opening balance doesn't
+          line up with the app's computed balance just before the period. The
+          Commit button stays fully enabled — this is a heads-up that the user
+          may be missing earlier transactions (e.g. a month-boundary gap), not a
+          hard stop. Amber treatment matches the existing summary/parse-check
+          warnings. Renders nothing when reconciliation is absent or matches. */}
+      {preview.reconciliation && !preview.reconciliation.openingMatches && (
+        <div
+          role="alert"
+          data-testid="import-opening-reconciliation-warning"
+          className="flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-400"
+        >
+          <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+          <div className="space-y-1 text-sm">
+            <p className="font-medium">Opening balance doesn&apos;t line up</p>
+            <p className="text-amber-700/90 dark:text-amber-400/90">
+              This statement starts at{' '}
+              {formatMoney(preview.reconciliation.statementOpeningBalance, accountCurrency)}, but
+              this account holds{' '}
+              {formatMoney(preview.reconciliation.appBalanceBeforeStatement, accountCurrency)} as of
+              the day before the statement period. Difference:{' '}
+              {formatMoney(preview.reconciliation.openingDelta, accountCurrency)}. You may be
+              missing transactions from before this period (e.g. a month-boundary gap where a
+              last-day purchase settled into the next month). You can still import.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-lg border">
         <Table data-testid="import-preview-table">

@@ -19,14 +19,41 @@ public class ParseStatementCommandHandlerTests
     private static readonly DateOnly PeriodFrom = new(2026, 4, 1);
     private static readonly DateOnly PeriodTo = new(2026, 4, 30);
 
-    private static Account NewAccount(string name = "Checking", string currency = "MDL")
+    private static Account NewAccount(string name = "Checking", string currency = "MDL", decimal anchor = 0m)
     {
         Result<Account> result = Account.Create(
             name,
             AccountType.Cash,
-            new Money(0m, currency),
+            new Money(anchor, currency),
             new DateOnly(2026, 1, 1),
             notes: null);
+
+        result.IsSuccess.Should().BeTrue();
+        return result.Value;
+    }
+
+    private static Transaction NewTransaction(
+        Guid accountId,
+        TransactionDirection direction,
+        decimal amount,
+        DateOnly date,
+        string description = "row",
+        bool isTransfer = false,
+        string currency = "MDL")
+    {
+        Result<Transaction> result = Transaction.Create(
+            accountId,
+            date,
+            direction,
+            new Money(amount, currency),
+            description,
+            TransactionSource.Imported,
+            categoryId: null,
+            importBatchId: null,
+            originalAmount: null,
+            originalCurrency: null,
+            isTransfer: isTransfer,
+            counterAccountId: null);
 
         result.IsSuccess.Should().BeTrue();
         return result.Value;
@@ -59,10 +86,13 @@ public class ParseStatementCommandHandlerTests
     }
 
     private static IBankStatementParser StubParser(params ParsedStatementRow[] rows)
+        => StubParser(openingBalance: 0m, rows);
+
+    private static IBankStatementParser StubParser(decimal openingBalance, params ParsedStatementRow[] rows)
     {
         var parsed = new ParsedStatement(
             new ParsedStatementPeriod(PeriodFrom, PeriodTo),
-            new ParsedStatementSummary(0m, 0m, 0m, 0m, 0m),
+            new ParsedStatementSummary(openingBalance, 0m, 0m, 0m, 0m),
             rows);
 
         IBankStatementParser parser = Substitute.For<IBankStatementParser>();
@@ -445,5 +475,178 @@ public class ParseStatementCommandHandlerTests
         row.OriginalCurrency.Should().Be("USD");
         row.IsDuplicate.Should().BeFalse();
         row.IsTransfer.Should().BeFalse();
+    }
+
+    private static ParseStatementCommand ReconcileCommand(Guid accountId) => new(
+        FileBytes: [0x25, 0x50, 0x44, 0x46],
+        FileName: "gama.pdf",
+        AccountId: accountId);
+
+    [Fact]
+    public async Task Handle_FirstImport_AnchorEqualsOpeningBalance_Reconciles()
+    {
+        // No prior rows; the account anchor equals the statement opening balance.
+        Account account = NewAccount(anchor: 1_000m);
+        IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [account]);
+
+        IBankStatementParser parser = StubParser(openingBalance: 1_000m);
+
+        var handler = new ParseStatementCommandHandler(db, [parser], NoSuggester(), TransferDetectorFor());
+
+        Result<StatementPreviewDto> result = await handler.Handle(ReconcileCommand(account.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        ReconciliationDto reconciliation = result.Value.Reconciliation;
+        reconciliation.StatementOpeningBalance.Should().Be(1_000m);
+        reconciliation.AppBalanceBeforeStatement.Should().Be(1_000m);
+        reconciliation.OpeningDelta.Should().Be(0m);
+        reconciliation.OpeningMatches.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Handle_WithPriorRows_SignedSumPlusAnchorEqualsOpening_Reconciles()
+    {
+        // anchor 100 + (+700 income − 200 expense) = 600 before the period.
+        Account account = NewAccount(anchor: 100m);
+        DateOnly priorDate = PeriodFrom.AddDays(-5);
+        IApplicationDbContext db = FakeApplicationDbContext.Create(
+            accounts: [account],
+            transactions:
+            [
+                NewTransaction(account.Id, TransactionDirection.Income, 700m, priorDate),
+                NewTransaction(account.Id, TransactionDirection.Expense, 200m, priorDate),
+            ]);
+
+        IBankStatementParser parser = StubParser(openingBalance: 600m);
+
+        var handler = new ParseStatementCommandHandler(db, [parser], NoSuggester(), TransferDetectorFor());
+
+        Result<StatementPreviewDto> result = await handler.Handle(ReconcileCommand(account.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        ReconciliationDto reconciliation = result.Value.Reconciliation;
+        reconciliation.AppBalanceBeforeStatement.Should().Be(600m);
+        reconciliation.OpeningDelta.Should().Be(0m);
+        reconciliation.OpeningMatches.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Handle_PriorRowsAfterPeriodStart_AreExcludedFromBalance()
+    {
+        // A row dated on/after Period.From must not count toward the pre-period balance.
+        Account account = NewAccount(anchor: 500m);
+        IApplicationDbContext db = FakeApplicationDbContext.Create(
+            accounts: [account],
+            transactions:
+            [
+                NewTransaction(account.Id, TransactionDirection.Income, 999m, PeriodFrom),
+            ]);
+
+        IBankStatementParser parser = StubParser(openingBalance: 500m);
+
+        var handler = new ParseStatementCommandHandler(db, [parser], NoSuggester(), TransferDetectorFor());
+
+        Result<StatementPreviewDto> result = await handler.Handle(ReconcileCommand(account.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Reconciliation.AppBalanceBeforeStatement.Should().Be(500m);
+        result.Value.Reconciliation.OpeningMatches.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Handle_PriorRowsExceedStatementOpening_FlagsGap()
+    {
+        // Regression pin for the real month-boundary gap: the app's pre-period balance
+        // is higher than the statement's printed opening by 1178.99, so a row settled
+        // into a later statement was lost. appBefore = 0 + 1178.99 = 1178.99,
+        // opening = 0 → delta = 0 − 1178.99 = −1178.99.
+        Account account = NewAccount(anchor: 0m);
+        DateOnly priorDate = PeriodFrom.AddDays(-1);
+        IApplicationDbContext db = FakeApplicationDbContext.Create(
+            accounts: [account],
+            transactions:
+            [
+                NewTransaction(account.Id, TransactionDirection.Income, 1_178.99m, priorDate),
+            ]);
+
+        IBankStatementParser parser = StubParser(openingBalance: 0m);
+
+        var handler = new ParseStatementCommandHandler(db, [parser], NoSuggester(), TransferDetectorFor());
+
+        Result<StatementPreviewDto> result = await handler.Handle(ReconcileCommand(account.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        ReconciliationDto reconciliation = result.Value.Reconciliation;
+        reconciliation.AppBalanceBeforeStatement.Should().Be(1_178.99m);
+        reconciliation.OpeningDelta.Should().Be(-1_178.99m);
+        reconciliation.OpeningMatches.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Handle_DeltaAtTolerance_Matches()
+    {
+        // appBefore = 1000, opening = 1000.01 → delta = 0.01 == tolerance → matches.
+        Account account = NewAccount(anchor: 1_000m);
+        IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [account]);
+
+        IBankStatementParser parser = StubParser(openingBalance: 1_000m + ImportReconciliation.ToleranceMinor);
+
+        var handler = new ParseStatementCommandHandler(db, [parser], NoSuggester(), TransferDetectorFor());
+
+        Result<StatementPreviewDto> result = await handler.Handle(ReconcileCommand(account.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Reconciliation.OpeningDelta.Should().Be(ImportReconciliation.ToleranceMinor);
+        result.Value.Reconciliation.OpeningMatches.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Handle_DeltaJustOverTolerance_DoesNotMatch()
+    {
+        // appBefore = 1000, opening = 1000.02 → delta = 0.02 > tolerance → gap.
+        Account account = NewAccount(anchor: 1_000m);
+        IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [account]);
+
+        IBankStatementParser parser = StubParser(openingBalance: 1_000m + 0.02m);
+
+        var handler = new ParseStatementCommandHandler(db, [parser], NoSuggester(), TransferDetectorFor());
+
+        Result<StatementPreviewDto> result = await handler.Handle(ReconcileCommand(account.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Reconciliation.OpeningDelta.Should().Be(0.02m);
+        result.Value.Reconciliation.OpeningMatches.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Handle_PriorTransferRow_MovesBalanceBySign()
+    {
+        // Transfers count toward the balance by Direction, same as any other row.
+        // anchor 0 + outgoing transfer (−300) = −300 before the period.
+        Account account = NewAccount(anchor: 0m);
+        DateOnly priorDate = PeriodFrom.AddDays(-3);
+        IApplicationDbContext db = FakeApplicationDbContext.Create(
+            accounts: [account],
+            transactions:
+            [
+                NewTransaction(
+                    account.Id,
+                    TransactionDirection.Expense,
+                    300m,
+                    priorDate,
+                    description: "A2A de iesire",
+                    isTransfer: true),
+            ]);
+
+        IBankStatementParser parser = StubParser(openingBalance: -300m);
+
+        var handler = new ParseStatementCommandHandler(db, [parser], NoSuggester(), TransferDetectorFor());
+
+        Result<StatementPreviewDto> result = await handler.Handle(ReconcileCommand(account.Id), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Reconciliation.AppBalanceBeforeStatement.Should().Be(-300m);
+        result.Value.Reconciliation.OpeningDelta.Should().Be(0m);
+        result.Value.Reconciliation.OpeningMatches.Should().BeTrue();
     }
 }

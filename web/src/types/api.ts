@@ -263,6 +263,25 @@ export interface StatementPreviewDto {
      */
     totalFees: number;
   };
+  /**
+   * Opening-balance reconciliation (Phase 1). Compares the statement's printed
+   * "Sold inițial" against the app's own computed balance for the account as of
+   * the day before the statement period. Surfaced as a non-blocking warning when
+   * `openingMatches` is false (e.g. a month-boundary gap where a last-day purchase
+   * settled into the next month leaves the user missing transactions before this
+   * period). May be absent on older previews / banks that don't expose an opening
+   * balance, so always guard `preview.reconciliation` before reading it.
+   */
+  reconciliation?: {
+    /** Statement's printed opening balance ("Sold inițial"). */
+    statementOpeningBalance: number;
+    /** App's computed balance just before the statement period. */
+    appBalanceBeforeStatement: number;
+    /** statementOpeningBalance − appBalanceBeforeStatement (can be negative). */
+    openingDelta: number;
+    /** true when |openingDelta| <= 0.01. */
+    openingMatches: boolean;
+  };
   transactions: ParsedTransactionPreview[];
 }
 

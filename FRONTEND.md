@@ -163,7 +163,11 @@ src/
                                  # summary card shows Opening / Closing (= opening+in−out) / Net / Fees + an
                                  # "opening + in − out = closing" reconciliation (fees are info-only, already in Out);
                                  # the import counter sums ALL included rows incl. transfers so it matches the
-                                 # statement totals; a row-derived block cross-checks In/Out/Fees vs the PDF header)
+                                 # statement totals; a row-derived block cross-checks In/Out/Fees vs the PDF header;
+                                 # opening-balance reconciliation banner [non-blocking, amber, TriangleAlert]: shown above the
+                                 # table when preview.reconciliation && !openingMatches — the statement's opening balance
+                                 # doesn't equal the app's balance just before the period (a month-boundary gap; backend
+                                 # ReconciliationDto). Commit stays enabled; renders nothing when it matches or is absent)
     settings/                    # fx-rates-table (with Source column + outline Manual/BNM
                                  # badges; BNM rows get a "will be re-fetched on next refresh"
                                  # title on the delete button), create-fx-rate-dialog (Phase 2),

@@ -438,8 +438,7 @@ describe('ImportPreview — duplicate statement rows', () => {
       // No "same key" / "unique key" warning was emitted during render.
       const sameKeyWarning = errorSpy.mock.calls.find((call) =>
         call.some(
-          (arg) =>
-            typeof arg === 'string' && (/same key/i.test(arg) || /unique.*key/i.test(arg)),
+          (arg) => typeof arg === 'string' && (/same key/i.test(arg) || /unique.*key/i.test(arg)),
         ),
       );
       expect(sameKeyWarning).toBeUndefined();
@@ -810,6 +809,86 @@ describe('ImportPreview — per-row note', () => {
     // Row 0 ships the trimmed note; row 1 (never touched) omits the key entirely.
     expect(body.transactions[0]).toMatchObject({ notes: 'Reimbursable expense' });
     expect(body.transactions[1]).not.toHaveProperty('notes');
+  });
+});
+
+describe('ImportPreview — opening-balance reconciliation banner', () => {
+  // Phase 1: a non-blocking amber warning when the statement's printed opening
+  // balance doesn't line up with the app's computed balance before the period.
+  function buildPreviewWithReconciliation(
+    reconciliation?: StatementPreviewDto['reconciliation'],
+  ): StatementPreviewDto {
+    // Spread the key only when present so we don't assign `reconciliation:
+    // undefined` (exactOptionalPropertyTypes is on).
+    return { ...buildPreview(), ...(reconciliation ? { reconciliation } : {}) };
+  }
+
+  const MISMATCH: NonNullable<StatementPreviewDto['reconciliation']> = {
+    statementOpeningBalance: 1000,
+    appBalanceBeforeStatement: 850,
+    openingDelta: 150,
+    openingMatches: false,
+  };
+
+  const MATCH: NonNullable<StatementPreviewDto['reconciliation']> = {
+    statementOpeningBalance: 1000,
+    appBalanceBeforeStatement: 1000,
+    openingDelta: 0,
+    openingMatches: true,
+  };
+
+  it('renders the warning banner when openingMatches is false', () => {
+    renderWithClient(
+      <ImportPreview
+        preview={buildPreviewWithReconciliation(MISMATCH)}
+        accountId={IMPORT_ACCOUNT_ID}
+        fileName="maib-may.pdf"
+        onCancel={() => {}}
+      />,
+    );
+
+    expect(screen.getByText(/opening balance doesn't line up/i)).toBeInTheDocument();
+  });
+
+  it('does NOT render the warning banner when openingMatches is true', () => {
+    renderWithClient(
+      <ImportPreview
+        preview={buildPreviewWithReconciliation(MATCH)}
+        accountId={IMPORT_ACCOUNT_ID}
+        fileName="maib-may.pdf"
+        onCancel={() => {}}
+      />,
+    );
+
+    expect(screen.queryByText(/opening balance doesn't line up/i)).not.toBeInTheDocument();
+  });
+
+  it('does NOT render the banner when reconciliation is absent', () => {
+    renderWithClient(
+      <ImportPreview
+        preview={buildPreviewWithReconciliation(undefined)}
+        accountId={IMPORT_ACCOUNT_ID}
+        fileName="maib-may.pdf"
+        onCancel={() => {}}
+      />,
+    );
+
+    expect(screen.queryByTestId('import-opening-reconciliation-warning')).not.toBeInTheDocument();
+  });
+
+  it('keeps the Commit button enabled in the mismatch case (warning, not block)', () => {
+    renderWithClient(
+      <ImportPreview
+        preview={buildPreviewWithReconciliation(MISMATCH)}
+        accountId={IMPORT_ACCOUNT_ID}
+        fileName="maib-may.pdf"
+        onCancel={() => {}}
+      />,
+    );
+
+    // Both rows in buildPreview() default to included, so the commit button is
+    // enabled regardless of the reconciliation state.
+    expect(screen.getByTestId('import-commit-button')).toBeEnabled();
   });
 });
 

@@ -3,7 +3,9 @@ using Microsoft.EntityFrameworkCore;
 using MoneyManagement.Application.Abstractions.Data;
 using MoneyManagement.Application.Abstractions.Imports;
 using MoneyManagement.Application.Abstractions.Messaging;
+using MoneyManagement.Domain.Accounts;
 using MoneyManagement.Domain.Imports;
+using MoneyManagement.Domain.Transactions;
 using MoneyManagement.SharedKernel;
 
 namespace MoneyManagement.Application.Features.Imports.ParseStatement;
@@ -18,13 +20,13 @@ internal sealed class ParseStatementCommandHandler(
         ParseStatementCommand command,
         CancellationToken cancellationToken)
     {
-        bool accountExists = await db.Accounts
-            .AnyAsync(a => a.Id == command.AccountId, cancellationToken);
+        Account? account = await db.Accounts
+            .FirstOrDefaultAsync(a => a.Id == command.AccountId, cancellationToken);
 
-        if (!accountExists)
+        if (account is null)
         {
             return Result.Failure<StatementPreviewDto>(
-                Domain.Accounts.AccountErrors.NotFound(command.AccountId));
+                AccountErrors.NotFound(command.AccountId));
         }
 
         string fileHash = Convert.ToHexString(SHA256.HashData(command.FileBytes));
@@ -62,6 +64,23 @@ internal sealed class ParseStatementCommandHandler(
 
         DateOnly fromDate = parsed.Period.From;
         DateOnly toDate = parsed.Period.To;
+
+        // Opening-balance reconciliation: compare the statement's printed opening
+        // balance against the app's computed balance just before the period. A
+        // mismatch flags a month-boundary data gap (e.g. last-day-of-month purchases
+        // that settled into the next statement). Same canonical formula as
+        // GetAccountDetailQueryHandler: anchor + Σ signed(amount) over all non-deleted
+        // rows. The global query filter already excludes soft-deleted rows; the explicit
+        // !t.IsDeleted is defense-in-depth. MAIB statements are in the account currency,
+        // so t.Amount.Amount is already account-native — no FX.
+        var prior = await db.Transactions
+            .Where(t => t.AccountId == command.AccountId && !t.IsDeleted && t.TransactionDate < fromDate)
+            .Select(t => new { t.Direction, t.Amount.Amount })
+            .ToListAsync(cancellationToken);
+        decimal priorNet = prior.Sum(r => r.Direction == TransactionDirection.Income ? r.Amount : -r.Amount);
+        decimal appBefore = account.Balance.Amount + priorNet;
+        decimal openingDelta = parsed.Summary.OpeningBalance - appBefore;
+        bool openingMatches = Math.Abs(openingDelta) <= ImportReconciliation.ToleranceMinor;
 
         var existing = await db.Transactions
             .Where(t => t.AccountId == command.AccountId
@@ -134,6 +153,11 @@ internal sealed class ParseStatementCommandHandler(
                 parsed.Summary.TotalIn,
                 parsed.Summary.TotalOut,
                 parsed.Summary.TotalFees),
+            new ReconciliationDto(
+                parsed.Summary.OpeningBalance,
+                appBefore,
+                openingDelta,
+                openingMatches),
             orderedPreviews);
 
         return preview;
