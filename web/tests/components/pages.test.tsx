@@ -21,6 +21,33 @@ vi.mock('recharts', async () => {
   };
 });
 
+// The import page mounts ImportPreview, whose row list is virtualized. jsdom's
+// 0px layout box would make a real virtualizer render zero rows, so the parsed
+// rows would never appear. Stub it (same rationale as the recharts mock above)
+// to enumerate every index so the preview renders in full.
+vi.mock('@tanstack/react-virtual', () => ({
+  useVirtualizer: ({
+    count,
+    getItemKey,
+  }: {
+    count: number;
+    getItemKey?: (index: number) => string | number;
+  }) => {
+    const size = 64;
+    return {
+      getTotalSize: () => count * size,
+      getVirtualItems: () =>
+        Array.from({ length: count }, (_, index) => ({
+          index,
+          key: getItemKey ? getItemKey(index) : index,
+          start: index * size,
+          size,
+        })),
+      measureElement: () => {},
+    };
+  },
+}));
+
 import AccountDetailPage from '@/app/accounts/[id]/page';
 import AccountsPage from '@/app/accounts/page';
 import BudgetsPage from '@/app/budgets/page';

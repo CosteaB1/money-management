@@ -1,27 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  formatEffectiveRate,
-  formatMDL,
-  formatMDLCompact,
-  formatMoney,
-} from '@/src/lib/utils/currency';
-
-describe('formatMDL', () => {
-  it('formats a value with the MDL ISO code', () => {
-    const out = formatMDL(1234.5);
-    expect(out).toMatch(/1\D?234[.,]50/);
-    expect(out).toContain('MDL');
-  });
-});
-
-describe('formatMDLCompact', () => {
-  it('formats a large value in compact notation with the MDL code', () => {
-    const out = formatMDLCompact(1_200_000);
-    expect(out).toContain('MDL');
-    // Compact notation collapses to a "1.2M"-style short form.
-    expect(out).toMatch(/1[.,]?2/);
-  });
-});
+import { formatEffectiveRate, formatMoney } from '@/src/lib/utils/currency';
 
 describe('formatMoney', () => {
   it('formats an arbitrary currency with its ISO code', () => {

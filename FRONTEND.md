@@ -31,7 +31,7 @@ Related docs:
 | Forms | React Hook Form + Zod |
 | Charts | Recharts |
 | Date handling | `date-fns` in `lib/utils/date.ts`. Displayed dates are day-first with an English-worded month via `formatShortDate` → `dd MMM yyyy` (e.g. `01 May 2026`, locale `enGB`); `formatMonthYear` → `MMM yyyy` (e.g. `May 2026`, locale `enGB`); `toIsoDateString` → `yyyy-MM-dd` is the API wire format. **Date entry uses native `<input type="date">`, so the picker's *displayed* format follows the browser/OS locale (not app-controllable); the stored/submitted value is always ISO.** |
-| Number/currency formatting | `formatMoney(amount, currency)` wrapping `Intl.NumberFormat('ro-MD', { style: 'currency', currency, currencyDisplay: 'code' })` — shows the ISO code (`MDL`, `USD`, …) rather than the `L`/`$`/`€` symbol. Per-account currency since Phase 1, multi-currency transactions since Phase 4. `formatMDL`/`formatMDLCompact` are dead helpers now — safe to delete in a cleanup pass. |
+| Number/currency formatting | `formatMoney(amount, currency)` wrapping `Intl.NumberFormat('ro-MD', { style: 'currency', currency, currencyDisplay: 'code' })` — shows the ISO code (`MDL`, `USD`, …) rather than the `L`/`$`/`€` symbol. Per-account currency since Phase 1, multi-currency transactions since Phase 4. (The legacy `formatMDL`/`formatMDLCompact` helpers were removed 2026-07-01 — `formatMoney` is the single money formatter; the module-level `formatter` const they wrapped is retained as `formatMoney`'s invalid-code fallback.) |
 | Lint/format | Biome v2 |
 | Unit tests | Vitest + Testing Library |
 | E2E | Playwright (3–5 critical flows only) |
@@ -93,8 +93,13 @@ app/                             # Next.js app dir is at web/app/, not web/src/a
 
 src/
   components/
-    ui/                          # shadcn-style primitives (hand-written for Tailwind v4)
-    layout/                      # sidebar, header
+    ui/                          # shadcn-style primitives (hand-written for Tailwind v4);
+                                 # sheet.tsx (side-anchored Dialog on @radix-ui/react-dialog) added
+                                 # 2026-07-01 for the mobile nav drawer
+    layout/                      # sidebar (desktop rail) + sidebar-nav (shared nav list, single
+                                 # source of NAV_ITEMS) + sidebar-drawer (md:hidden mobile nav Sheet)
+                                 # + header (toggle collapses the desktop rail AND opens the mobile
+                                 # drawer; aria-expanded reflects drawer state) + theme-toggle
     accounts/                    # create-account-dialog (with currency Select, Phase 1),
                                  # accounts-table (with MDL-eq column, Phase 2; name cell now
                                  # links to /accounts/[id] — row-action dropdown still works
@@ -167,7 +172,12 @@ src/
                                  # opening-balance reconciliation banner [non-blocking, amber, TriangleAlert]: shown above the
                                  # table when preview.reconciliation && !openingMatches — the statement's opening balance
                                  # doesn't equal the app's balance just before the period (a month-boundary gap; backend
-                                 # ReconciliationDto). Commit stays enabled; renders nothing when it matches or is absent)
+                                 # ReconciliationDto). Commit stays enabled; renders nothing when it matches or is absent);
+                                 # PERF (2026-07-01): the row list is virtualized with @tanstack/react-virtual —
+                                 # dynamic measureElement (variable-height rows), index-based keys PRESERVED (the parser's
+                                 # intentional duplicate rows must not collide), summary/banners/column-header/commit stay
+                                 # OUTSIDE the scroll window; the <table> became an ARIA <ul>/<li> list so rows can be
+                                 # absolutely positioned (screen readers announce a list of the full row count)
     settings/                    # fx-rates-table (with Source column + outline Manual/BNM
                                  # badges; BNM rows get a "will be re-fetched on next refresh"
                                  # title on the delete button), create-fx-rate-dialog (Phase 2),
@@ -433,7 +443,7 @@ Strategy:
 - Server Components for data fetching; stream with `<Suspense>`
 - Route-based code splitting (automatic with App Router)
 - Recharts is heavy — lazy-loaded on report pages only
-- Transactions list virtualized (`@tanstack/react-virtual`) once it grows past 100 visible rows
+- Import preview list virtualized with `@tanstack/react-virtual` (dynamic row measurement) so 900+ row statements stay smooth (shipped 2026-07-01). The main transactions list is a candidate for the same treatment past 100 visible rows (not yet virtualized).
 
 ---
 

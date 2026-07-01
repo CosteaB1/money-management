@@ -10,6 +10,32 @@ import type { StatementPreviewDto } from '@/src/types/api';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
+// jsdom has a 0px layout box → a real virtualizer renders zero rows. Stub it
+// (per the repo's Recharts-mock precedent) so getVirtualItems() enumerates
+// every index and the full row list renders for the interaction assertions.
+vi.mock('@tanstack/react-virtual', () => ({
+  useVirtualizer: ({
+    count,
+    getItemKey,
+  }: {
+    count: number;
+    getItemKey?: (index: number) => string | number;
+  }) => {
+    const size = 64;
+    return {
+      getTotalSize: () => count * size,
+      getVirtualItems: () =>
+        Array.from({ length: count }, (_, index) => ({
+          index,
+          key: getItemKey ? getItemKey(index) : index,
+          start: index * size,
+          size,
+        })),
+      measureElement: () => {},
+    };
+  },
+}));
+
 function renderWithClient(ui: React.ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },

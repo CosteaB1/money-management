@@ -1,9 +1,10 @@
 'use client';
 
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { Building2, StickyNote, TriangleAlert } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { type Dispatch, memo, useCallback, useMemo, useReducer, useState } from 'react';
+import { type Dispatch, memo, useCallback, useMemo, useReducer, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { CreateCategoryDialog } from '@/src/components/categories/create-category-dialog';
 import { Badge } from '@/src/components/ui/badge';
@@ -18,18 +19,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/src/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/src/components/ui/table';
 import { useAccounts } from '@/src/lib/api/accounts';
 import { useCategories } from '@/src/lib/api/categories';
 import { convertFx } from '@/src/lib/api/fx-rates';
 import { useCommitImport } from '@/src/lib/api/imports';
+import { cn } from '@/src/lib/utils/cn';
 import { formatEffectiveRate, formatMoney } from '@/src/lib/utils/currency';
 import { formatShortDate } from '@/src/lib/utils/date';
 import { proposeKeyword } from '@/src/lib/utils/propose-keyword';
@@ -107,6 +101,14 @@ type SelectionsAction =
 
 const UNCATEGORIZED = '__uncategorized__';
 const NONE_COUNTER = '__none__';
+
+// Shared grid template for the preview column header and every data row so the
+// two line up. Nine tracks matching the old <th> widths: a leading spacer that
+// pairs the checkbox column with its (sr-only) header, then include / date /
+// description(flex) / direction / amount / category / transfer / counter. On
+// small screens rows fall back to a stacked single column (see the row markup),
+// so this md:-only template only governs the desktop layout the tests exercise.
+const IMPORT_ROW_GRID = 'md:grid-cols-[3rem_8rem_minmax(0,1fr)_7rem_8rem_14rem_6rem_14rem]';
 // Sentinel option appended to every per-row category picker. Selecting it does
 // NOT categorize the row — it opens the shared CreateCategoryDialog so the user
 // can mint a new category without leaving the import flow. See the row Select's
@@ -427,6 +429,28 @@ export function ImportPreview({ preview, accountId, fileName, onCancel }: Props)
     setNewCategoryRow(idx);
   }, []);
 
+  // ── Virtualized row list ──────────────────────────────────────────────────
+  // A 900-row maib statement mounts two Radix <Select>s per row; rendering all
+  // of them at once is what made the preview janky. We virtualize ONLY the row
+  // list (the summary, banners, column header and commit controls stay outside
+  // the scroll window) so the DOM only ever holds the visible rows + a small
+  // overscan.
+  const scrollParentRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: preview.transactions.length,
+    getScrollElement: () => scrollParentRef.current,
+    // Rows are VARIABLE height — a revealed note, cross-currency received-amount
+    // field, or learn-keyword input all grow a row. `estimateSize` is just the
+    // initial guess; `measureElement` (wired on each rendered row below) reports
+    // the real height so the spacer + offsets stay correct as rows expand.
+    estimateSize: () => 64,
+    // Index-based keys, matching the row `key` and every reducer action's
+    // `index`. A content key would collide on the parser's intentional duplicate
+    // rows and mis-map per-row state (see the row-key comment below).
+    getItemKey: (index) => index,
+    overscan: 8,
+  });
+
   const handleCommit = async () => {
     // Guard: a cross-currency transfer row (included, transfer, counter account
     // in a different currency) must carry a positive received amount. We can't
@@ -715,32 +739,56 @@ export function ImportPreview({ preview, accountId, fileName, onCancel }: Props)
         </div>
       )}
 
-      <div className="rounded-lg border">
-        <Table data-testid="import-preview-table">
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-12">
-                <span className="sr-only">Include</span>
-              </TableHead>
-              <TableHead className="w-32">Date</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead>Direction</TableHead>
-              <TableHead className="text-right">Amount</TableHead>
-              <TableHead className="w-56">Category</TableHead>
-              <TableHead className="w-24 text-center">Transfer</TableHead>
-              <TableHead className="w-56">Counter account</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+      {/*
+        Virtualized preview list. Semantics note: the pre-virtualization markup
+        was a <table>. Absolutely-positioning <tr>s (which virtualization needs)
+        breaks table layout + strips the a11y table from the accessibility tree,
+        so we render an ARIA list instead — each preview row is a self-contained
+        editable record (checkbox + selects + inputs), which maps to a list of
+        items far better than a cell-by-cell data grid. The column header lives
+        OUTSIDE the scroll window; only the row list scrolls + virtualizes.
+      */}
+      <div className="rounded-lg border" data-testid="import-preview-table">
+        {/* Column header — kept out of the virtualized scroll window. Hidden on
+            small screens where each row stacks its own labels would be too wide;
+            it aligns to the same grid template as every row via IMPORT_ROW_GRID. */}
+        <div
+          className={`hidden border-b bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground md:grid md:items-center md:gap-3 ${IMPORT_ROW_GRID}`}
+        >
+          <span className="sr-only">Include</span>
+          <span>Date</span>
+          <span>Description</span>
+          <span>Direction</span>
+          <span className="text-right">Amount</span>
+          <span>Category</span>
+          <span className="text-center">Transfer</span>
+          <span>Counter account</span>
+        </div>
+        {/*
+          Scroll + virtualization window. The virtualizer measures this element
+          (getScrollElement) and only the visible rows + overscan are in the DOM.
+          The inner <ul> is the full-height spacer and its <li>s are the rows — a
+          native list re-establishes the semantics we gave up by leaving <table>
+          behind (screen readers announce a list of the full row count), and
+          virtualization still works because an <li> can be absolutely positioned
+          once the default list styling is reset. (<ul> only allows <li> children,
+          so the sized spacer IS the <ul> rather than a wrapping <div>.)
+        */}
+        <div
+          ref={scrollParentRef}
+          className="max-h-[65vh] overflow-auto"
+          data-testid="import-preview-scroll"
+        >
+          <ul
+            className="relative m-0 w-full list-none p-0"
+            style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+          >
             {/*
               Each row is a memoized <ImportPreviewRow>. This is the core of the
               typing-lag fix: the reducer returns the SAME object reference for
               every row except the one being edited (`idx === action.index ? {…} : row`),
               so a memoized row whose other props are referentially stable will
-              skip re-rendering when a *different* row changes. Without the memo,
-              one keystroke in any free-text field re-rendered all rows — each of
-              which mounts two Radix <Select>s — which is what froze a 900-row
-              statement.
+              skip re-rendering when a *different* row changes.
 
               All props below are stable across parent re-renders: `dispatch` is
               stable from useReducer; `row`/`sel` come from arrays whose unchanged
@@ -749,35 +797,55 @@ export function ImportPreview({ preview, accountId, fileName, onCancel }: Props)
               are wrapped in useCallback. `isNoteOpen` is a primitive boolean that
               only changes for the toggled row.
 
-              Keyed by array index, NOT by row content: a maib statement
-              legitimately contains repeated rows with identical
-              date+direction+amount+description (the parser keeps these snapshot
-              duplicates on purpose), so a content-based key collides and makes
-              React mis-associate per-row state. The list is parsed once and
-              never reordered/inserted/removed, and every reducer action
-              addresses rows by `idx`, so the index is a stable, correct key.
+              Keyed by array index (getItemKey above returns the index too), NOT by
+              row content: a maib statement legitimately contains repeated rows with
+              identical date+direction+amount+description (the parser keeps these
+              snapshot duplicates on purpose), so a content-based key collides and
+              makes React mis-associate per-row state. The list is parsed once and
+              never reordered/inserted/removed, and every reducer action addresses
+              rows by `idx`, so the index is a stable, correct key.
             */}
-            {preview.transactions.map((row, idx) => (
-              <ImportPreviewRow
-                // biome-ignore lint/suspicious/noArrayIndexKey: the parser keeps duplicate statement rows (identical date/direction/amount/description), so a content key collides; the list is never reordered/inserted/removed and the reducer addresses rows by idx, making the index the correct stable key.
-                key={idx}
-                row={row}
-                idx={idx}
-                sel={selections[idx]}
-                dispatch={dispatch}
-                categories={categories}
-                accountCurrency={accountCurrency}
-                counterAccountOptions={counterAccountOptions}
-                currencyByAccountId={currencyByAccountId}
-                categoryNameById={categoryNameById}
-                isNoteOpen={openNoteRows.has(idx)}
-                onToggleNote={toggleNoteRow}
-                onSelectCounterAccount={handleSelectCounterAccount}
-                onRequestNewCategory={handleRequestNewCategory}
-              />
-            ))}
-          </TableBody>
-        </Table>
+            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const idx = virtualRow.index;
+              const row = preview.transactions[idx];
+              if (!row) return null;
+              return (
+                // `virtualRow.key` is index-based (getItemKey returns the index):
+                // the parser keeps duplicate statement rows (identical
+                // date/direction/amount/description), so a content key collides;
+                // the list is never reordered/inserted/removed and the reducer
+                // addresses rows by idx, making the index the correct stable key.
+                <li
+                  key={virtualRow.key}
+                  // measureElement reports each row's REAL height back to the
+                  // virtualizer (rows grow when a note / received-amount / learn
+                  // input is revealed), so the spacer + offsets stay accurate
+                  // without a fixed row height.
+                  ref={rowVirtualizer.measureElement}
+                  data-index={idx}
+                  className="absolute left-0 top-0 w-full"
+                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                >
+                  <ImportPreviewRow
+                    row={row}
+                    idx={idx}
+                    sel={selections[idx]}
+                    dispatch={dispatch}
+                    categories={categories}
+                    accountCurrency={accountCurrency}
+                    counterAccountOptions={counterAccountOptions}
+                    currencyByAccountId={currencyByAccountId}
+                    categoryNameById={categoryNameById}
+                    isNoteOpen={openNoteRows.has(idx)}
+                    onToggleNote={toggleNoteRow}
+                    onSelectCounterAccount={handleSelectCounterAccount}
+                    onRequestNewCategory={handleRequestNewCategory}
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       </div>
 
       <div className="flex items-center justify-between">
@@ -960,13 +1028,19 @@ function ImportPreviewRowComponent({
   const showNote = isNoteOpen || committedNote.trim().length > 0;
 
   return (
-    <TableRow
+    <div
       data-testid="import-preview-row"
       data-duplicate={row.isDuplicate ? 'true' : 'false'}
       data-transfer={rowIsTransfer ? 'true' : 'false'}
-      className={row.isDuplicate ? 'bg-amber-500/10 hover:bg-amber-500/15' : undefined}
+      className={cn(
+        // Desktop: an aligned grid matching the column header. Mobile: rows stack
+        // into a single column so the dense controls stay usable on narrow widths.
+        'grid grid-cols-1 gap-2 border-b p-3 text-sm md:items-start md:gap-3',
+        IMPORT_ROW_GRID,
+        row.isDuplicate ? 'bg-amber-500/10 hover:bg-amber-500/15' : 'hover:bg-muted/50',
+      )}
     >
-      <TableCell>
+      <div>
         <Checkbox
           checked={included}
           data-testid={`import-row-checkbox-${idx}`}
@@ -979,11 +1053,9 @@ function ImportPreviewRowComponent({
           }
           aria-label={`Include row ${idx + 1}`}
         />
-      </TableCell>
-      <TableCell className="text-muted-foreground">
-        {formatShortDate(row.transactionDate)}
-      </TableCell>
-      <TableCell className="max-w-70">
+      </div>
+      <div className="text-muted-foreground">{formatShortDate(row.transactionDate)}</div>
+      <div className="min-w-0">
         <div className="flex items-center gap-2">
           <div className="truncate" title={row.description}>
             {row.description}
@@ -1056,19 +1128,19 @@ function ImportPreviewRowComponent({
             />
           </div>
         )}
-      </TableCell>
-      <TableCell>
+      </div>
+      <div>
         {isExpense ? (
           <Badge variant="destructive">Expense</Badge>
         ) : (
           <Badge variant="success">Income</Badge>
         )}
-      </TableCell>
-      <TableCell className={amountClass}>
+      </div>
+      <div className={amountClass}>
         {isExpense ? '-' : '+'}
         {formatMoney(row.amount, accountCurrency)}
-      </TableCell>
-      <TableCell>
+      </div>
+      <div className="min-w-0">
         <Select
           value={sel?.categoryId ?? UNCATEGORIZED}
           onValueChange={(v) => {
@@ -1153,8 +1225,8 @@ function ImportPreviewRowComponent({
             </button>
           </div>
         )}
-      </TableCell>
-      <TableCell className="text-center">
+      </div>
+      <div className="md:text-center">
         <Checkbox
           checked={rowIsTransfer}
           data-testid={`import-row-transfer-${idx}`}
@@ -1167,8 +1239,8 @@ function ImportPreviewRowComponent({
           }
           aria-label={`Mark row ${idx + 1} as transfer`}
         />
-      </TableCell>
-      <TableCell>
+      </div>
+      <div className="min-w-0">
         {rowIsTransfer ? (
           counterAccountOptions.length === 0 ? (
             // Empty: render disabled with a quiet hint. Counter is optional, so we
@@ -1279,8 +1351,8 @@ function ImportPreviewRowComponent({
             </>
           )
         ) : null}
-      </TableCell>
-    </TableRow>
+      </div>
+    </div>
   );
 }
 

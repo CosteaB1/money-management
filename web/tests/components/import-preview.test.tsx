@@ -14,6 +14,35 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
+// jsdom reports a 0px layout box, so a real virtualizer would measure the
+// scroll window as empty and render zero rows — breaking every row-interaction
+// assertion below. Mirroring the repo's Recharts-mock precedent, we stub
+// `useVirtualizer` so `getVirtualItems()` enumerates EVERY index (start/size
+// derived from a fixed estimate) and `measureElement` is a no-op. The row list
+// then renders in full, exactly as it would once measured in a real browser.
+vi.mock('@tanstack/react-virtual', () => ({
+  useVirtualizer: ({
+    count,
+    getItemKey,
+  }: {
+    count: number;
+    getItemKey?: (index: number) => string | number;
+  }) => {
+    const size = 64;
+    return {
+      getTotalSize: () => count * size,
+      getVirtualItems: () =>
+        Array.from({ length: count }, (_, index) => ({
+          index,
+          key: getItemKey ? getItemKey(index) : index,
+          start: index * size,
+          size,
+        })),
+      measureElement: () => {},
+    };
+  },
+}));
+
 function renderWithClient(ui: React.ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -79,6 +108,41 @@ async function waitForAccountsLoaded() {
     expect(trigger).toHaveTextContent(/optional/i);
   });
 }
+
+describe('ImportPreview — virtualized row list', () => {
+  it('renders the preview rows inside a fixed-height scroll container', async () => {
+    renderWithClient(
+      <ImportPreview
+        preview={buildPreview()}
+        accountId={IMPORT_ACCOUNT_ID}
+        fileName="maib-may.pdf"
+        onCancel={() => {}}
+      />,
+    );
+
+    // The rows live inside the dedicated scroll window, which is capped in
+    // height and scrolls independently of the summary/header/commit controls.
+    const scroll = await screen.findByTestId('import-preview-scroll');
+    expect(scroll).toHaveClass('overflow-auto');
+    expect(scroll.className).toMatch(/max-h-\[65vh\]/);
+
+    // List semantics survive virtualization via a native <ul>/<li> inside the
+    // scroll window (we left <table> behind — see the component comment).
+    const list = within(scroll).getByRole('list');
+    expect(list.tagName).toBe('UL');
+
+    // Both rows render (the virtualizer mock enumerates every index) and they
+    // are nested within the scroll container, not siblings of it.
+    const rows = screen.getAllByTestId('import-preview-row');
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(scroll).toContainElement(row);
+      // Each row is wrapped in a list item — the a11y structure a screen reader
+      // announces ("list, 2 items").
+      expect(row.closest('li')).not.toBeNull();
+    }
+  });
+});
 
 describe('ImportPreview — counter-account picker', () => {
   it('renders the counter picker for a transfer-flagged row', async () => {

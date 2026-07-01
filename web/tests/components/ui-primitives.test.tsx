@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { Card, CardContent, CardFooter } from '@/src/components/ui/card';
@@ -20,6 +20,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/src/components/ui/select';
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/src/components/ui/sheet';
 import { Table, TableBody, TableCaption, TableCell, TableRow } from '@/src/components/ui/table';
 
 describe('UI primitives — rarely-used subcomponents', () => {
@@ -66,6 +75,32 @@ describe('UI primitives — rarely-used subcomponents', () => {
     );
     await user.click(screen.getByTestId('primitives-select'));
     expect(await screen.findByText('Group label')).toBeInTheDocument();
+  });
+
+  it('Sheet opens from a trigger and renders its title, description and close', async () => {
+    const user = userEvent.setup();
+    render(
+      <Sheet>
+        <SheetTrigger data-testid="primitives-sheet">Open nav</SheetTrigger>
+        <SheetContent>
+          <SheetHeader>
+            <SheetTitle>Sheet title</SheetTitle>
+            <SheetDescription>Sheet description</SheetDescription>
+          </SheetHeader>
+          <SheetClose data-testid="primitives-sheet-close">Dismiss</SheetClose>
+        </SheetContent>
+      </Sheet>,
+    );
+
+    await user.click(screen.getByTestId('primitives-sheet'));
+    expect(await screen.findByText('Sheet title')).toBeInTheDocument();
+    expect(screen.getByText('Sheet description')).toBeInTheDocument();
+
+    // The custom SheetClose and the built-in corner close both dismiss the sheet.
+    await user.click(screen.getByTestId('primitives-sheet-close'));
+    await waitFor(() => {
+      expect(screen.queryByText('Sheet title')).not.toBeInTheDocument();
+    });
   });
 
   it('DropdownMenu renders a label and separator', async () => {

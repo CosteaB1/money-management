@@ -8,20 +8,6 @@ const formatter = new Intl.NumberFormat('ro-MD', {
   maximumFractionDigits: 2,
 });
 
-export function formatMDL(amount: number): string {
-  return formatter.format(amount);
-}
-
-export function formatMDLCompact(amount: number): string {
-  return new Intl.NumberFormat('ro-MD', {
-    style: 'currency',
-    currency: 'MDL',
-    currencyDisplay: 'code',
-    notation: 'compact',
-    maximumFractionDigits: 1,
-  }).format(amount);
-}
-
 /**
  * Effective cross-currency rate label, computed LOCALLY as
  * `sourceAmount / destinationAmount` (source-ccy per dest-ccy). Returns null
