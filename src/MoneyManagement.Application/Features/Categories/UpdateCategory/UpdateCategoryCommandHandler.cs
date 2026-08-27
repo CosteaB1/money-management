@@ -19,6 +19,19 @@ internal sealed class UpdateCategoryCommandHandler(IApplicationDbContext db)
             return Result.Failure(CategoryErrors.NotFound(command.Id));
         }
 
+        // Names are unique per flow among active categories; archived ones free the
+        // name. The category itself is excluded so a self-match (no rename) passes.
+        string normalized = command.Name.Trim().ToUpperInvariant();
+        bool duplicate = await db.Categories
+            .AnyAsync(
+                c => c.Id != command.Id && !c.IsArchived && c.Flow == command.Flow && c.Name.ToUpper() == normalized,
+                cancellationToken);
+
+        if (duplicate)
+        {
+            return Result.Failure(CategoryErrors.DuplicateName(command.Name.Trim(), command.Flow));
+        }
+
         Result updateResult = category.Update(command.Name, command.Flow, command.Color);
         if (updateResult.IsFailure)
         {

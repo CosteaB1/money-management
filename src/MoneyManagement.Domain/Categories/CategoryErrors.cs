@@ -39,4 +39,7 @@ public static class CategoryErrors
 
     public static Error PatternKeywordExists(string keyword) =>
         Error.Conflict("category.pattern_keyword_exists", $"A category pattern for keyword '{keyword}' already exists.");
+
+    public static Error DuplicateName(string name, CategoryFlow flow) =>
+        Error.Conflict("category.duplicate_name", $"An active {flow} category named '{name}' already exists.");
 }

@@ -39,9 +39,17 @@ internal sealed class CategoryPatternSeeder(
         using IServiceScope scope = scopeFactory.CreateScope();
         ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
-        Dictionary<string, Guid> categoriesByName = await db.Categories
+        // Category names are not unique (users can create duplicates), so a
+        // straight ToDictionary would throw on startup; the oldest match wins.
+        Dictionary<string, Guid> categoriesByName = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var category in await db.Categories
             .Where(c => !c.IsArchived)
-            .ToDictionaryAsync(c => c.Name, c => c.Id, StringComparer.OrdinalIgnoreCase, cancellationToken);
+            .OrderBy(c => c.CreatedAt)
+            .Select(c => new { c.Name, c.Id })
+            .ToListAsync(cancellationToken))
+        {
+            categoriesByName.TryAdd(category.Name, category.Id);
+        }
 
         HashSet<string> existingKeywords = await db.CategoryPatterns
             .Select(p => p.Keyword)

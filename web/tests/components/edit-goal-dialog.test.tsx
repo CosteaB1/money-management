@@ -21,11 +21,18 @@ function renderWithClient(ui: ReactElement) {
   );
 }
 
+// Target dates must be in the future (validated in UTC on both ends), so the
+// fixture pins one a year ahead of today instead of hardcoding a date that
+// eventually goes stale and blocks every submit.
+const futureTargetDate = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
+  .toISOString()
+  .slice(0, 10);
+
 const manualGoal: GoalDto = {
   id: 'g0000001-0000-0000-0000-000000000002',
   name: 'Vacation',
   targetAmount: 10000,
-  targetDate: '2026-08-15',
+  targetDate: futureTargetDate,
   linkedAccountId: null,
   linkedAccountName: null,
   saved: 4500,

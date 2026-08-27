@@ -22,6 +22,17 @@ internal sealed class CreateCategoryCommandHandler(IApplicationDbContext db)
             }
         }
 
+        // Names are unique per flow among active categories; archiving a category
+        // frees its name for reuse.
+        string normalized = command.Name.Trim().ToUpperInvariant();
+        bool duplicate = await db.Categories
+            .AnyAsync(c => !c.IsArchived && c.Flow == command.Flow && c.Name.ToUpper() == normalized, cancellationToken);
+
+        if (duplicate)
+        {
+            return Result.Failure<Guid>(CategoryErrors.DuplicateName(command.Name.Trim(), command.Flow));
+        }
+
         Result<Category> categoryResult = Category.Create(
             command.Name,
             command.Flow,
