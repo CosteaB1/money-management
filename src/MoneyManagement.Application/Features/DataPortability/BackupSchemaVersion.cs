@@ -8,5 +8,5 @@ namespace MoneyManagement.Application.Features.DataPortability;
 /// </summary>
 public static class BackupSchemaVersion
 {
-    public const int Current = 4;
+    public const int Current = 5;
 }

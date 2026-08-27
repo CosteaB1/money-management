@@ -908,6 +908,179 @@ export interface AccountDetailDto {
   realActivityCount: number;
 }
 
+// TODO: regenerate via `npm run gen:api` once the /loans endpoints land in OpenAPI.
+
+/**
+ * Direction of a personal loan, from the user's point of view.
+ *  - `Received` → money the user borrowed (they owe it back). UI label: "Borrowed".
+ *  - `Given`    → money the user lent out (it's owed back to them). UI label: "Lent".
+ *
+ * Serialized as a string by the backend (`JsonStringEnumConverter`).
+ */
+export type LoanDirection = 'Given' | 'Received';
+
+/**
+ * Lifecycle of a loan — pre-computed server-side.
+ *  - `Active`  → `outstanding > 0`.
+ *  - `Settled` → fully repaid (`outstanding === 0`).
+ *
+ * Serialized as a string by the backend (`JsonStringEnumConverter`).
+ */
+export type LoanStatus = 'Active' | 'Settled';
+
+/**
+ * Mirrors the backend LoanDto (list endpoint row).
+ *
+ * v1 loans are interest-free and same-currency only: `principal`,
+ * `totalRepaid`, and `outstanding` are all in `currency`.
+ * `outstanding = principal - totalRepaid`; the loan flips to `Settled`
+ * when it reaches 0. Archived loans are excluded from the list unless it
+ * is fetched with `includeArchived=true`, and stay reachable via
+ * GET /loans/{id}.
+ */
+export interface LoanDto {
+  id: string;
+  direction: LoanDirection;
+  /** Who the money moved to/from (e.g. "Parents"). */
+  counterparty: string;
+  /** Original amount lent/borrowed, in `currency`. */
+  principal: number;
+  /** ISO 4217 currency code (e.g. "MDL", "EUR"). */
+  currency: string;
+  /** ISO date string (yyyy-MM-dd) — when the money changed hands. */
+  loanDate: string;
+  /** Σ of recorded payments, in `currency`. */
+  totalRepaid: number;
+  /** `principal - totalRepaid`, in `currency`. */
+  outstanding: number;
+  /**
+   * `outstanding` expressed in MDL using the FX rate available for
+   * `currency` on the latest applicable date. `null` if no rate exists.
+   * For MDL loans this is the identity case and equals `outstanding`.
+   */
+  outstandingMdl: number | null;
+  /** True when `outstandingMdl` could not be computed for lack of an FX rate. */
+  missingFxRate: boolean;
+  status: LoanStatus;
+  paymentCount: number;
+  notes: string | null;
+  /**
+   * Soft-delete flag. Archived rows only appear in the list when it is
+   * fetched with `includeArchived=true`; unarchiving (POST
+   * /loans/{id}/unarchive) flips this back without moving any money.
+   */
+  isArchived: boolean;
+}
+
+/**
+ * Single repayment against a loan. When the payment was recorded against
+ * an account, the backend also wrote a real (transfer-flagged) transaction
+ * on it — `transactionId`/`accountId`/`accountName` are non-null in that
+ * case, and deleting the payment also deletes that transaction.
+ */
+export interface LoanPaymentDto {
+  id: string;
+  /** Positive amount, in the loan's currency. */
+  amount: number;
+  /** ISO 4217 currency code — always equals the loan's currency in v1. */
+  currency: string;
+  /** ISO date string (yyyy-MM-dd) */
+  occurredOn: string;
+  /** Linked transaction id, or null when the payment isn't tracked in an account. */
+  transactionId: string | null;
+  accountId: string | null;
+  accountName: string | null;
+  notes: string | null;
+}
+
+/**
+ * GET /loans/{id} — per-loan detail view used by the /loans/{id} page.
+ *
+ * Extends the list-row shape (`LoanDto` fields) with archive/creation
+ * metadata, the optional disbursement transaction link (set when the
+ * original loan amount was recorded against an account), and the payment
+ * history (descending by `occurredOn`).
+ */
+export interface LoanDetailDto {
+  id: string;
+  direction: LoanDirection;
+  counterparty: string;
+  principal: number;
+  /** ISO 4217 currency code (e.g. "MDL", "EUR"). */
+  currency: string;
+  /** ISO date string (yyyy-MM-dd) */
+  loanDate: string;
+  totalRepaid: number;
+  outstanding: number;
+  /** MDL-equivalent of `outstanding`, or null when no FX rate exists. */
+  outstandingMdl: number | null;
+  missingFxRate: boolean;
+  status: LoanStatus;
+  paymentCount: number;
+  notes: string | null;
+  isArchived: boolean;
+  /** ISO date string (yyyy-MM-dd) — when the loan was created in the app. */
+  createdOn: string;
+  /** Transaction written for the original disbursement, or null when untracked. */
+  disbursementTransactionId: string | null;
+  disbursementAccountId: string | null;
+  disbursementAccountName: string | null;
+  /** Descending by `occurredOn`. */
+  payments: LoanPaymentDto[];
+}
+
+/**
+ * POST /loans request body. `accountId` links the disbursement to an
+ * account — the backend then writes a real transfer-flagged transaction
+ * on it (so the movement never pollutes income/expense stats). Omit or
+ * send null when the money isn't tracked in any account. The account's
+ * currency must equal `currency` (v1 is same-currency only).
+ */
+export interface CreateLoanRequest {
+  direction: LoanDirection;
+  counterparty: string;
+  principal: number;
+  /** ISO 4217 currency code (e.g. "MDL", "EUR"). */
+  currency: string;
+  /** ISO date string (yyyy-MM-dd) */
+  loanDate: string;
+  accountId?: string | null;
+  notes?: string | null;
+}
+
+export interface CreateLoanResponse {
+  id: string;
+}
+
+/**
+ * PUT /loans/{id} request body. Edits only the user-mutable metadata —
+ * `counterparty` and `notes` (`null` to clear). Principal, currency,
+ * direction, and loan date are fixed at creation. Returns 204.
+ */
+export interface UpdateLoanRequest {
+  counterparty: string;
+  notes?: string | null;
+}
+
+/**
+ * POST /loans/{id}/payments request body. `accountId` mirrors the create
+ * contract: when set, the backend also writes a transfer-flagged
+ * transaction on that account (same-currency only); null/omitted means
+ * the repayment isn't tracked in any account. The server re-validates
+ * that `amount` doesn't exceed the loan's outstanding balance.
+ */
+export interface RecordLoanPaymentRequest {
+  amount: number;
+  /** ISO date string (yyyy-MM-dd) */
+  occurredOn: string;
+  accountId?: string | null;
+  notes?: string | null;
+}
+
+export interface RecordLoanPaymentResponse {
+  id: string;
+}
+
 /**
  * Per-table row counts returned by POST /data/import after a successful
  * restore. Mirrors the backend's import-result DTO.

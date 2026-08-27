@@ -53,6 +53,8 @@ import AccountsPage from '@/app/accounts/page';
 import BudgetsPage from '@/app/budgets/page';
 import GoalDetailPage from '@/app/goals/[id]/page';
 import GoalsPage from '@/app/goals/page';
+import LoanDetailPage from '@/app/loans/[id]/page';
+import LoansPage from '@/app/loans/page';
 import DashboardPage from '@/app/page';
 import ReportsPage from '@/app/reports/page';
 import CategoriesSettingsPage from '@/app/settings/categories/page';
@@ -99,6 +101,15 @@ describe('App pages', () => {
     expect(screen.getByRole('heading', { name: 'Goals' })).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByText('Emergency fund')).toBeInTheDocument();
+    });
+  });
+
+  it('Loans page renders header + summary tiles + table', async () => {
+    renderWithClient(<LoansPage />);
+    expect(screen.getByRole('heading', { name: 'Loans' })).toBeInTheDocument();
+    expect(screen.getByTestId('loans-summary')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Parents')).toBeInTheDocument();
     });
   });
 
@@ -189,6 +200,16 @@ describe('App pages', () => {
     renderWithClient(ui);
     await waitFor(() => {
       expect(screen.getByText('Emergency fund')).toBeInTheDocument();
+    });
+  });
+
+  it('Loan detail page (async server component) resolves params and renders the view', async () => {
+    const ui = await LoanDetailPage({
+      params: Promise.resolve({ id: 'l0000001-0000-0000-0000-000000000001' }),
+    });
+    renderWithClient(ui);
+    await waitFor(() => {
+      expect(screen.getByTestId('loan-detail-counterparty')).toHaveTextContent('Parents');
     });
   });
 });

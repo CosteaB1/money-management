@@ -13,4 +13,6 @@ public sealed record ImportDataResult(
     int Budgets,
     int BudgetPeriods,
     int SavingsGoals,
-    int SavingsGoalContributions);
+    int SavingsGoalContributions,
+    int Loans,
+    int LoanPayments);

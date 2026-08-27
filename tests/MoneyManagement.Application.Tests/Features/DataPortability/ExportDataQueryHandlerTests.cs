@@ -54,5 +54,7 @@ public class ExportDataQueryHandlerTests
         Budgets: [],
         BudgetPeriods: [],
         SavingsGoals: [],
-        SavingsGoalContributions: []);
+        SavingsGoalContributions: [],
+        Loans: [],
+        LoanPayments: []);
 }

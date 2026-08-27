@@ -4,6 +4,7 @@ using MoneyManagement.Domain.Budgets;
 using MoneyManagement.Domain.Categories;
 using MoneyManagement.Domain.FxRates;
 using MoneyManagement.Domain.Imports;
+using MoneyManagement.Domain.Loans;
 using MoneyManagement.Domain.SavingsGoals;
 using MoneyManagement.Domain.Transactions;
 
@@ -21,6 +22,8 @@ public interface IApplicationDbContext
     DbSet<BudgetPeriod> BudgetPeriods { get; }
     DbSet<SavingsGoal> SavingsGoals { get; }
     DbSet<SavingsGoalContribution> SavingsGoalContributions { get; }
+    DbSet<Loan> Loans { get; }
+    DbSet<LoanPayment> LoanPayments { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

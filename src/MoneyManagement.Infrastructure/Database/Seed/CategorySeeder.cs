@@ -30,6 +30,7 @@ internal sealed class CategorySeeder(
         (SeededCategories.BalanceAdjustmentId,             "Balance Adjustment", CategoryFlow.Both,    "#0891b2"),
         (SeededCategories.InvestmentId,                    "Investment",         CategoryFlow.Both,    "#2563eb"),
         (SeededCategories.WithdrawalId,                    "Withdrawal",         CategoryFlow.Both,    "#b45309"),
+        (SeededCategories.LoanId,                          "Loan",               CategoryFlow.Both,    "#7c3aed"),
     ];
 
     public async Task StartAsync(CancellationToken cancellationToken)

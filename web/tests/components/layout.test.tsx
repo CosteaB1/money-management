@@ -107,6 +107,7 @@ describe('SidebarDrawer (mobile nav)', () => {
       'nav-transactions',
       'nav-budgets',
       'nav-goals',
+      'nav-loans',
       'nav-reports',
       'nav-fx-rates',
       'nav-data',

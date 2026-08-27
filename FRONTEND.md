@@ -88,6 +88,12 @@ app/                             # Next.js app dir is at web/app/, not web/src/a
   goals/[id]/page.tsx            # built: per-goal detail (Server-Component shell rendering
                                  # GoalDetailView — header strip, Progress card, Pace card,
                                  # History chart, Contributions table, skeleton + 404 paths)
+  loans/page.tsx                 # built: Loans tab — "Owed to me" / "I owe" summary tiles (MDL,
+                                 # net-worth-card-style missing-FX warning) + loans table +
+                                 # Add-loan / Record-payment / Edit / Archive dialogs
+  loans/[id]/page.tsx            # built: per-loan detail (async Server-Component shell rendering
+                                 # LoanDetailView — header strip, Progress card, disbursement
+                                 # line, Payments table w/ per-row delete, skeleton + 404 paths)
   reports/page.tsx               # built: tabbed page (Monthly Summary, Categories, Top Payees,
                                  # Balance Over Time, Year-over-Year) backed by /reports/* endpoints
 
@@ -240,6 +246,51 @@ src/
                                  # (Date/signed Amount/Source badge — "Manual" vs "From <linked
                                  # account>"/Notes), goal-detail-skeleton + goal-detail-error
                                  # (404 surfaces a distinct "Goal not found." from generic)
+    loans/                       # loans-table (built: counterparty cell links to /loans/[id],
+                                 # Borrowed [Received] / Lent [Given] direction badge, principal,
+                                 # repaid, outstanding w/ muted MDL-eq sub-line + missing-FX icon,
+                                 # 100%-capped progress bar, Active/Settled status pill, loan date,
+                                 # row-action menu: Record payment [hidden when Settled] / Edit /
+                                 # Archive; a "Show archived" switch above the table [accounts-page
+                                 # pattern] fetches useLoans(includeArchived) — archived rows get an
+                                 # Archived outline badge and their menu collapses to Unarchive
+                                 # only), loans-summary (built: two tiles — "Owed to me" =
+                                 # Σ outstandingMdl of Given, "I owe" = Σ of Received; sums ONLY
+                                 # non-archived loans even when the toggle reveals archived rows;
+                                 # when any loan can't convert, shows the partial sum + amber
+                                 # warning link to /settings/fx-rates — net-worth-card's exact
+                                 # treatment),
+                                 # create-loan-dialog (built: RHF/Zod, fieldset/legend native radio
+                                 # "I borrowed money" / "I lent money", counterparty, principal +
+                                 # currency Select, date [default today UTC, max today], OPTIONAL
+                                 # account Select — "No account" default, non-archived accounts
+                                 # filtered to the picked currency, incompatible selection reset on
+                                 # currency change, muted hint that linking records a transaction —
+                                 # notes; ApiError surfaced inline role="alert"),
+                                 # record-payment-dialog (built: shared by table row action +
+                                 # detail header; context line "Repaying loan from X — outstanding
+                                 # N", amount [Zod max = outstanding + native max], date [min =
+                                 # loanDate, max today], same currency-filtered account Select,
+                                 # notes), edit-loan-dialog (built: counterparty + notes only,
+                                 # mirrors the PUT contract), archive-loan-dialog (built: confirm
+                                 # before soft archive; when outstanding > 0 the copy gains an
+                                 # amber TriangleAlert warning that archiving hides the debt from
+                                 # the list/totals without settling it — settle-then-archive is
+                                 # the intended flow),
+                                 # detail/ — loan-detail-view (top-level Client owning useLoanDetail
+                                 # + loading/404 "Loan not found."/generic-error/happy branches),
+                                 # loan-detail-header (back link, counterparty h1, Borrowed-or-Lent +
+                                 # Status + Archived badges, action group Record payment [hidden when
+                                 # Settled] / Edit / Archive — swapped for a single Unarchive button
+                                 # when archived, the accounts-detail precedent), loan-progress-card (Outstanding big number in native
+                                 # currency + muted MDL-eq, "repaid X of Y" subtitle, 100%-capped
+                                 # bar, missing-FX <output> warning), disbursement line ("Disbursed
+                                 # via <account> on <date>" when disbursementAccountName present),
+                                 # loan-payments-table (Date / signed Amount / Account [— when
+                                 # unlinked] / Notes / per-row delete w/ confirm; confirm copy warns
+                                 # "This will also delete the linked transaction on <account>." only
+                                 # when transactionId non-null; newest-first as delivered by API),
+                                 # loan-detail-skeleton + loan-detail-error
     dashboard/                   # net-worth-card (sums balanceMdl + missing-rate warning),
                                  # account-card (native + MDL-eq line), recent-transactions,
                                  # monthly-summary-card (built: income/expense/net + savings rate,
@@ -272,6 +323,20 @@ src/
                                  # useUpdateGoal / useUpdateManualSaved / useArchiveGoal —
                                  # detail keyed at ['goals','detail',id] under the existing
                                  # ['goals'] prefix so every mutation refreshes it for free),
+                                 # loans (built: useLoans [optional includeArchived, keyed under
+                                 # the ['loans'] prefix] / useLoanDetail / useCreateLoan /
+                                 # useUpdateLoan / useArchiveLoan / useUnarchiveLoan [POST
+                                 # /loans/{id}/unarchive, invalidates ['loans'] only — no money
+                                 # moves] / useRecordLoanPayment /
+                                 # useDeleteLoanPayment — detail keyed at ['loans','detail',id]
+                                 # under ['loans']; update/archive invalidate ['loans'] only,
+                                 # while the money-moving trio — create, recordPayment,
+                                 # deletePayment — invalidates SEVEN roots: ['loans'],
+                                 # ['accounts'], ['transactions'], ['dashboard'], ['reports'],
+                                 # ['budgets'], ['goals'] — same blanket set as useCreateTransfer,
+                                 # because a linked loan movement shifts account balances which
+                                 # feed dashboards, balance-over-time reports, and linked-mode
+                                 # goals; applied unconditionally, account-linked or not),
                                  # dashboard (useDashboardSummary, useNetWorthTrend — keys
                                  # rooted at ['dashboard'] so transaction/import/adjust mutations
                                  # invalidate them via the shared ['dashboard'] prefix),
@@ -291,7 +356,8 @@ src/
     mocks/                       # MSW handlers + seed + store
     utils/                       # formatMoney (currency-aware), date helpers
   types/api.ts                   # mirrors backend DTOs; covers FxRateDto, transfer + adjustment fields,
-                                 # AccountDto.balance/balanceMdl (live, computed on read), TransactionDto.currency/amountMdl
+                                 # AccountDto.balance/balanceMdl (live, computed on read), TransactionDto.currency/amountMdl,
+                                 # LoanDirection/LoanStatus/LoanDto/LoanPaymentDto/LoanDetailDto + loan request shapes
 ```
 
 ---

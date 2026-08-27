@@ -194,6 +194,38 @@ internal sealed class EfBackupStore(ApplicationDbContext context) : IBackupStore
                 c.UpdatedAt))
             .ToListAsync(cancellationToken);
 
+        List<LoanBackup> loans = await context.Loans
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Select(l => new LoanBackup(
+                l.Id,
+                l.Direction,
+                l.Counterparty,
+                l.Principal.Amount,
+                l.Principal.Currency,
+                l.LoanDate,
+                l.Notes,
+                l.DisbursementTransactionId,
+                l.IsArchived,
+                l.CreatedAt,
+                l.UpdatedAt))
+            .ToListAsync(cancellationToken);
+
+        List<LoanPaymentBackup> loanPayments = await context.LoanPayments
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Select(p => new LoanPaymentBackup(
+                p.Id,
+                p.LoanId,
+                p.Amount.Amount,
+                p.Amount.Currency,
+                p.OccurredOn,
+                p.TransactionId,
+                p.Notes,
+                p.CreatedAt,
+                p.UpdatedAt))
+            .ToListAsync(cancellationToken);
+
         return new BackupDocument(
             BackupSchemaVersion.Current,
             DateTimeOffset.UtcNow,
@@ -205,7 +237,9 @@ internal sealed class EfBackupStore(ApplicationDbContext context) : IBackupStore
             budgets,
             budgetPeriods,
             savingsGoals,
-            savingsGoalContributions);
+            savingsGoalContributions,
+            loans,
+            loanPayments);
     }
 
     public async Task<ImportDataResult> RestoreAsync(BackupDocument document, CancellationToken cancellationToken)
@@ -216,6 +250,10 @@ internal sealed class EfBackupStore(ApplicationDbContext context) : IBackupStore
         // Wipe child-first to respect FKs. ExecuteDeleteAsync issues a single
         // DELETE per table and bypasses the change tracker; IgnoreQueryFilters
         // ensures soft-deleted transactions and archived rows are removed too.
+        // Loan payments then loans go FIRST — both FK transactions, so they
+        // must be gone before the transactions wipe below.
+        await context.LoanPayments.IgnoreQueryFilters().ExecuteDeleteAsync(cancellationToken);
+        await context.Loans.IgnoreQueryFilters().ExecuteDeleteAsync(cancellationToken);
         await context.SavingsGoalContributions.IgnoreQueryFilters().ExecuteDeleteAsync(cancellationToken);
         await context.SavingsGoals.IgnoreQueryFilters().ExecuteDeleteAsync(cancellationToken);
         await context.BudgetPeriods.IgnoreQueryFilters().ExecuteDeleteAsync(cancellationToken);
@@ -254,6 +292,11 @@ internal sealed class EfBackupStore(ApplicationDbContext context) : IBackupStore
         int savingsGoalContributions =
             await InsertSavingsGoalContributionsAsync(document.SavingsGoalContributions, cancellationToken);
 
+        // Loans then loan payments go LAST — both FK transactions (checked at
+        // insert time), so every referenced transaction must already exist.
+        int loans = await InsertLoansAsync(document.Loans, cancellationToken);
+        int loanPayments = await InsertLoanPaymentsAsync(document.LoanPayments, cancellationToken);
+
         await transaction.CommitAsync(cancellationToken);
 
         return new ImportDataResult(
@@ -265,7 +308,9 @@ internal sealed class EfBackupStore(ApplicationDbContext context) : IBackupStore
             budgets,
             budgetPeriods,
             savingsGoals,
-            savingsGoalContributions);
+            savingsGoalContributions,
+            loans,
+            loanPayments);
     }
 
     // ---- Inserts ---------------------------------------------------------
@@ -531,6 +576,64 @@ internal sealed class EfBackupStore(ApplicationDbContext context) : IBackupStore
                     P(r.AmountValue),
                     P(r.AmountCurrency),
                     P(r.OccurredOn),
+                    PNullable(r.Notes),
+                    P(r.CreatedAt),
+                    P(r.UpdatedAt),
+                ],
+                ct);
+        }
+
+        return count;
+    }
+
+    private async Task<int> InsertLoansAsync(IReadOnlyList<LoanBackup> rows, CancellationToken ct)
+    {
+        string sql = InsertSql<Domain.Loans.Loan>(
+            "id", "direction", "counterparty", "principal_value", "principal_currency", "loan_date",
+            "notes", "disbursement_transaction_id", "is_archived", "created_at", "updated_at");
+
+        int count = 0;
+        foreach (LoanBackup r in rows)
+        {
+            count += await context.Database.ExecuteSqlRawAsync(
+                sql,
+                [
+                    P(r.Id),
+                    P(r.Direction.ToString()),
+                    P(r.Counterparty),
+                    P(r.PrincipalValue),
+                    P(r.PrincipalCurrency),
+                    P(r.LoanDate),
+                    PNullable(r.Notes),
+                    PNullable(r.DisbursementTransactionId),
+                    P(r.IsArchived),
+                    P(r.CreatedAt),
+                    P(r.UpdatedAt),
+                ],
+                ct);
+        }
+
+        return count;
+    }
+
+    private async Task<int> InsertLoanPaymentsAsync(IReadOnlyList<LoanPaymentBackup> rows, CancellationToken ct)
+    {
+        string sql = InsertSql<Domain.Loans.LoanPayment>(
+            "id", "loan_id", "amount_value", "amount_currency", "occurred_on", "transaction_id",
+            "notes", "created_at", "updated_at");
+
+        int count = 0;
+        foreach (LoanPaymentBackup r in rows)
+        {
+            count += await context.Database.ExecuteSqlRawAsync(
+                sql,
+                [
+                    P(r.Id),
+                    P(r.LoanId),
+                    P(r.AmountValue),
+                    P(r.AmountCurrency),
+                    P(r.OccurredOn),
+                    PNullable(r.TransactionId),
                     PNullable(r.Notes),
                     P(r.CreatedAt),
                     P(r.UpdatedAt),

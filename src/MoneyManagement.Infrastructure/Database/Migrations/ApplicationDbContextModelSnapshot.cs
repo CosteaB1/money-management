@@ -402,6 +402,136 @@ namespace MoneyManagement.Infrastructure.Database.Migrations
                     b.ToTable("import_batches", (string)null);
                 });
 
+            modelBuilder.Entity("MoneyManagement.Domain.Loans.Loan", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Counterparty")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("counterparty");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Direction")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("direction");
+
+                    b.Property<Guid?>("DisbursementTransactionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("disbursement_transaction_id");
+
+                    b.Property<bool>("IsArchived")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_archived");
+
+                    b.Property<DateOnly>("LoanDate")
+                        .HasColumnType("date")
+                        .HasColumnName("loan_date");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("notes");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.ComplexProperty(typeof(Dictionary<string, object>), "Principal", "MoneyManagement.Domain.Loans.Loan.Principal#Money", b1 =>
+                        {
+                            b1.IsRequired();
+
+                            b1.Property<decimal>("Amount")
+                                .HasColumnType("numeric(18,2)")
+                                .HasColumnName("principal_value");
+
+                            b1.Property<string>("Currency")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("character varying(3)")
+                                .HasColumnName("principal_currency");
+                        });
+
+                    b.HasKey("Id")
+                        .HasName("pk_loans");
+
+                    b.HasIndex("DisbursementTransactionId")
+                        .HasDatabaseName("ix_loans_disbursement_transaction_id");
+
+                    b.ToTable("loans", (string)null);
+                });
+
+            modelBuilder.Entity("MoneyManagement.Domain.Loans.LoanPayment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("LoanId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("loan_id");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("notes");
+
+                    b.Property<DateOnly>("OccurredOn")
+                        .HasColumnType("date")
+                        .HasColumnName("occurred_on");
+
+                    b.Property<Guid?>("TransactionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("transaction_id");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.ComplexProperty(typeof(Dictionary<string, object>), "Amount", "MoneyManagement.Domain.Loans.LoanPayment.Amount#Money", b1 =>
+                        {
+                            b1.IsRequired();
+
+                            b1.Property<decimal>("Amount")
+                                .HasColumnType("numeric(18,2)")
+                                .HasColumnName("amount_value");
+
+                            b1.Property<string>("Currency")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("character varying(3)")
+                                .HasColumnName("amount_currency");
+                        });
+
+                    b.HasKey("Id")
+                        .HasName("pk_loan_payments");
+
+                    b.HasIndex("TransactionId")
+                        .HasDatabaseName("ix_loan_payments_transaction_id");
+
+                    b.HasIndex("LoanId", "OccurredOn")
+                        .IsDescending(false, true)
+                        .HasDatabaseName("ix_loan_payments_loan_id_occurred_on");
+
+                    b.ToTable("loan_payments", (string)null);
+                });
+
             modelBuilder.Entity("MoneyManagement.Domain.SavingsGoals.SavingsGoal", b =>
                 {
                     b.Property<Guid>("Id")
@@ -650,6 +780,31 @@ namespace MoneyManagement.Infrastructure.Database.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_category_patterns_categories_category_id");
+                });
+
+            modelBuilder.Entity("MoneyManagement.Domain.Loans.Loan", b =>
+                {
+                    b.HasOne("MoneyManagement.Domain.Transactions.Transaction", null)
+                        .WithMany()
+                        .HasForeignKey("DisbursementTransactionId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_loans_transactions_disbursement_transaction_id");
+                });
+
+            modelBuilder.Entity("MoneyManagement.Domain.Loans.LoanPayment", b =>
+                {
+                    b.HasOne("MoneyManagement.Domain.Loans.Loan", null)
+                        .WithMany()
+                        .HasForeignKey("LoanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_loan_payments_loans_loan_id");
+
+                    b.HasOne("MoneyManagement.Domain.Transactions.Transaction", null)
+                        .WithMany()
+                        .HasForeignKey("TransactionId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_loan_payments_transactions_transaction_id");
                 });
 
             modelBuilder.Entity("MoneyManagement.Domain.SavingsGoals.SavingsGoal", b =>

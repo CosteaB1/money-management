@@ -5,6 +5,7 @@ using MoneyManagement.Domain.Budgets;
 using MoneyManagement.Domain.Categories;
 using MoneyManagement.Domain.FxRates;
 using MoneyManagement.Domain.Imports;
+using MoneyManagement.Domain.Loans;
 using MoneyManagement.Domain.SavingsGoals;
 using MoneyManagement.Domain.Transactions;
 using NSubstitute;
@@ -30,7 +31,9 @@ internal static class FakeApplicationDbContext
         IEnumerable<Budget>? budgets = null,
         IEnumerable<BudgetPeriod>? budgetPeriods = null,
         IEnumerable<SavingsGoal>? savingsGoals = null,
-        IEnumerable<SavingsGoalContribution>? savingsGoalContributions = null)
+        IEnumerable<SavingsGoalContribution>? savingsGoalContributions = null,
+        IEnumerable<Loan>? loans = null,
+        IEnumerable<LoanPayment>? loanPayments = null)
     {
         DbSet<Account> accountSet = new FakeDbSet<Account>(accounts ?? []);
         DbSet<FxRate> fxRateSet = new FakeDbSet<FxRate>(fxRates ?? []);
@@ -43,6 +46,8 @@ internal static class FakeApplicationDbContext
         DbSet<SavingsGoal> savingsGoalSet = new FakeDbSet<SavingsGoal>(savingsGoals ?? []);
         DbSet<SavingsGoalContribution> contributionSet =
             new FakeDbSet<SavingsGoalContribution>(savingsGoalContributions ?? []);
+        DbSet<Loan> loanSet = new FakeDbSet<Loan>(loans ?? []);
+        DbSet<LoanPayment> loanPaymentSet = new FakeDbSet<LoanPayment>(loanPayments ?? []);
 
         IApplicationDbContext db = Substitute.For<IApplicationDbContext>();
         db.Accounts.Returns(accountSet);
@@ -55,6 +60,8 @@ internal static class FakeApplicationDbContext
         db.BudgetPeriods.Returns(budgetPeriodSet);
         db.SavingsGoals.Returns(savingsGoalSet);
         db.SavingsGoalContributions.Returns(contributionSet);
+        db.Loans.Returns(loanSet);
+        db.LoanPayments.Returns(loanPaymentSet);
         return db;
     }
 }

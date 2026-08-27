@@ -61,6 +61,40 @@ public class ImportDataCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_NullLoansArray_FailsWithMalformedBackup()
+    {
+        IBackupStore store = Substitute.For<IBackupStore>();
+        var handler = new ImportDataCommandHandler(store);
+
+        // loans is a backed-up entity since schema v5; a doc missing the array
+        // is malformed and must not reach the destructive restore.
+        BackupDocument document = ValidDocument() with { Loans = null! };
+
+        Result<ImportDataResult> result = await handler.Handle(
+            new ImportDataCommand(document), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("data.malformed_backup");
+        await store.DidNotReceive().RestoreAsync(Arg.Any<BackupDocument>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_NullLoanPaymentsArray_FailsWithMalformedBackup()
+    {
+        IBackupStore store = Substitute.For<IBackupStore>();
+        var handler = new ImportDataCommandHandler(store);
+
+        BackupDocument document = ValidDocument() with { LoanPayments = null! };
+
+        Result<ImportDataResult> result = await handler.Handle(
+            new ImportDataCommand(document), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("data.malformed_backup");
+        await store.DidNotReceive().RestoreAsync(Arg.Any<BackupDocument>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Handle_ValidDocument_CallsRestoreOnceAndReturnsCounts()
     {
         var counts = new ImportDataResult(
@@ -72,7 +106,9 @@ public class ImportDataCommandHandlerTests
             Budgets: 5,
             BudgetPeriods: 6,
             SavingsGoals: 1,
-            SavingsGoalContributions: 7);
+            SavingsGoalContributions: 7,
+            Loans: 2,
+            LoanPayments: 4);
 
         IBackupStore store = Substitute.For<IBackupStore>();
         store.RestoreAsync(Arg.Any<BackupDocument>(), Arg.Any<CancellationToken>()).Returns(counts);
@@ -100,5 +136,7 @@ public class ImportDataCommandHandlerTests
         Budgets: [],
         BudgetPeriods: [],
         SavingsGoals: [],
-        SavingsGoalContributions: []);
+        SavingsGoalContributions: [],
+        Loans: [],
+        LoanPayments: []);
 }

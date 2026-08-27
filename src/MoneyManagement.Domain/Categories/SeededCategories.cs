@@ -39,4 +39,14 @@ public static class SeededCategories
     /// expense row (not a P&amp;L adjustment). Flow is <see cref="CategoryFlow.Both"/>.
     /// </summary>
     public static readonly Guid WithdrawalId = new("00000000-0000-0000-0000-00000000000f");
+
+    /// <summary>
+    /// "Loan" - applied to the transactions synthesized by the Loans slice
+    /// (disbursements and repayments recorded against an account). Those rows
+    /// are transfer-flagged so they stay out of income/expense aggregates —
+    /// same precedent as Investment/Withdrawal. Flow is
+    /// <see cref="CategoryFlow.Both"/> since a loan movement can be either
+    /// direction depending on who lent to whom.
+    /// </summary>
+    public static readonly Guid LoanId = new("00000000-0000-0000-0000-000000000012");
 }

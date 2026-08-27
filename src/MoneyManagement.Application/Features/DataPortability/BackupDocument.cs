@@ -1,6 +1,7 @@
 using MoneyManagement.Domain.Accounts;
 using MoneyManagement.Domain.Categories;
 using MoneyManagement.Domain.Imports;
+using MoneyManagement.Domain.Loans;
 using MoneyManagement.Domain.Transactions;
 
 namespace MoneyManagement.Application.Features.DataPortability;
@@ -36,7 +37,9 @@ public sealed record BackupDocument(
     IReadOnlyList<BudgetBackup> Budgets,
     IReadOnlyList<BudgetPeriodBackup> BudgetPeriods,
     IReadOnlyList<SavingsGoalBackup> SavingsGoals,
-    IReadOnlyList<SavingsGoalContributionBackup> SavingsGoalContributions);
+    IReadOnlyList<SavingsGoalContributionBackup> SavingsGoalContributions,
+    IReadOnlyList<LoanBackup> Loans,
+    IReadOnlyList<LoanPaymentBackup> LoanPayments);
 
 /// <summary>Mirrors the <c>accounts</c> table (<c>Balance</c> is the Money pair).</summary>
 public sealed record AccountBackup(
@@ -158,6 +161,40 @@ public sealed record SavingsGoalContributionBackup(
     decimal AmountValue,
     string AmountCurrency,
     DateOnly OccurredOn,
+    string? Notes,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+/// <summary>
+/// Mirrors the <c>loans</c> table (<c>Principal</c> is the Money pair).
+/// <c>DisbursementTransactionId</c> FKs <c>transactions</c> (ON DELETE SET
+/// NULL), so on restore these rows must be reinserted AFTER transactions.
+/// </summary>
+public sealed record LoanBackup(
+    Guid Id,
+    LoanDirection Direction,
+    string Counterparty,
+    decimal PrincipalValue,
+    string PrincipalCurrency,
+    DateOnly LoanDate,
+    string? Notes,
+    Guid? DisbursementTransactionId,
+    bool IsArchived,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+/// <summary>
+/// Mirrors the <c>loan_payments</c> table (<c>Amount</c> is the Money pair).
+/// FKs both <c>loans</c> (CASCADE) and <c>transactions</c> (SET NULL), so on
+/// restore these rows are reinserted LAST.
+/// </summary>
+public sealed record LoanPaymentBackup(
+    Guid Id,
+    Guid LoanId,
+    decimal AmountValue,
+    string AmountCurrency,
+    DateOnly OccurredOn,
+    Guid? TransactionId,
     string? Notes,
     DateTime CreatedAt,
     DateTime UpdatedAt);

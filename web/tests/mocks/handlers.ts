@@ -8,6 +8,8 @@ import type {
   FxRateDto,
   GoalDetailDto,
   GoalDto,
+  LoanDetailDto,
+  LoanDto,
   PagedResult,
   StatementPreviewDto,
   TransactionDto,
@@ -267,6 +269,164 @@ const goals: GoalDto[] = [
     missingFxRate: false,
   },
 ];
+
+// Loans seed covers both directions plus both status buckets: a Received
+// (borrowed) EUR loan with partial repayments, an Active Given (lent) MDL
+// loan, and a Settled Given USD loan. MDL-eq figures follow the seeded FX
+// rates (EUR→MDL 19.2, USD→MDL 17.5).
+const loans: LoanDto[] = [
+  {
+    id: 'l0000001-0000-0000-0000-000000000001',
+    direction: 'Received',
+    counterparty: 'Parents',
+    principal: 5000,
+    currency: 'EUR',
+    loanDate: '2026-01-10',
+    totalRepaid: 2000,
+    outstanding: 3000,
+    // 3000 EUR * 19.2 = 57600 MDL
+    outstandingMdl: 57600,
+    missingFxRate: false,
+    status: 'Active',
+    paymentCount: 2,
+    notes: 'Borrowed for the car',
+    isArchived: false,
+  },
+  {
+    id: 'l0000001-0000-0000-0000-000000000002',
+    direction: 'Given',
+    counterparty: 'Ion',
+    principal: 2500,
+    currency: 'MDL',
+    loanDate: '2026-03-05',
+    totalRepaid: 500,
+    outstanding: 2000,
+    outstandingMdl: 2000,
+    missingFxRate: false,
+    status: 'Active',
+    paymentCount: 1,
+    notes: null,
+    isArchived: false,
+  },
+  {
+    id: 'l0000001-0000-0000-0000-000000000003',
+    direction: 'Given',
+    counterparty: 'Maria',
+    principal: 1000,
+    currency: 'USD',
+    loanDate: '2025-11-20',
+    totalRepaid: 1000,
+    outstanding: 0,
+    outstandingMdl: 0,
+    missingFxRate: false,
+    status: 'Settled',
+    paymentCount: 3,
+    notes: null,
+    isArchived: false,
+  },
+  // Single archived loan so component tests can exercise the "Show
+  // archived" toggle + Unarchive action. Only surfaces from the list
+  // handler when `includeArchived=true`. Outstanding is intentionally
+  // non-zero: archiving hides a loan without settling it, and the summary
+  // tiles must never count this row.
+  {
+    id: 'l0000001-0000-0000-0000-000000000004',
+    direction: 'Given',
+    counterparty: 'Old colleague',
+    principal: 800,
+    currency: 'MDL',
+    loanDate: '2024-05-01',
+    totalRepaid: 300,
+    outstanding: 500,
+    outstandingMdl: 500,
+    missingFxRate: false,
+    status: 'Active',
+    paymentCount: 1,
+    notes: null,
+    isArchived: true,
+  },
+];
+
+// Detail-view seeds for loans. The Parents loan has untracked payments
+// (no linked transactions/accounts); the Ion loan exercises the
+// account-linked path — disbursement line + a payment whose deletion also
+// deletes the linked transaction (the confirm-dialog warning path).
+const loanDetails: Record<string, LoanDetailDto> = {
+  'l0000001-0000-0000-0000-000000000001': {
+    id: 'l0000001-0000-0000-0000-000000000001',
+    direction: 'Received',
+    counterparty: 'Parents',
+    principal: 5000,
+    currency: 'EUR',
+    loanDate: '2026-01-10',
+    totalRepaid: 2000,
+    outstanding: 3000,
+    outstandingMdl: 57600,
+    missingFxRate: false,
+    status: 'Active',
+    paymentCount: 2,
+    notes: 'Borrowed for the car',
+    isArchived: false,
+    createdOn: '2026-01-10',
+    disbursementTransactionId: null,
+    disbursementAccountId: null,
+    disbursementAccountName: null,
+    payments: [
+      {
+        id: 'lp000001-0000-0000-0000-000000000002',
+        amount: 1200,
+        currency: 'EUR',
+        occurredOn: '2026-06-15',
+        transactionId: null,
+        accountId: null,
+        accountName: null,
+        notes: 'June repayment',
+      },
+      {
+        id: 'lp000001-0000-0000-0000-000000000001',
+        amount: 800,
+        currency: 'EUR',
+        occurredOn: '2026-03-01',
+        transactionId: null,
+        accountId: null,
+        accountName: null,
+        notes: null,
+      },
+    ],
+  },
+  'l0000001-0000-0000-0000-000000000002': {
+    id: 'l0000001-0000-0000-0000-000000000002',
+    direction: 'Given',
+    counterparty: 'Ion',
+    principal: 2500,
+    currency: 'MDL',
+    loanDate: '2026-03-05',
+    totalRepaid: 500,
+    outstanding: 2000,
+    outstandingMdl: 2000,
+    missingFxRate: false,
+    status: 'Active',
+    paymentCount: 1,
+    notes: null,
+    isArchived: false,
+    createdOn: '2026-03-05',
+    disbursementTransactionId: 'tx-loan-disburse',
+    disbursementAccountId: '11111111-1111-1111-1111-111111111111',
+    disbursementAccountName: 'Cash Wallet',
+    payments: [
+      {
+        id: 'lp000001-0000-0000-0000-000000000003',
+        amount: 500,
+        currency: 'MDL',
+        occurredOn: '2026-04-20',
+        transactionId: 'tx-loan-payment',
+        accountId: '11111111-1111-1111-1111-111111111111',
+        accountName: 'Cash Wallet',
+        notes: null,
+      },
+    ],
+  },
+};
 
 const fxRates: FxRateDto[] = [
   {
@@ -873,6 +1033,50 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 });
   }),
   http.delete('*/goals/:id', () => new HttpResponse(null, { status: 204 })),
+  http.get('*/loans', ({ request }) => {
+    const url = new URL(request.url);
+    const includeArchived = url.searchParams.get('includeArchived') === 'true';
+    const rows = includeArchived ? loans : loans.filter((l) => !l.isArchived);
+    return HttpResponse.json(rows);
+  }),
+  http.get('*/loans/:id', ({ params }) => {
+    const id = String(params.id);
+    const detail = loanDetails[id];
+    if (!detail) {
+      return HttpResponse.json(
+        { error: 'Loan not found', code: 'loan.not_found' },
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(detail);
+  }),
+  http.post('*/loans', async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    if (!body.counterparty || String(body.counterparty).trim().length === 0) {
+      return HttpResponse.json({ error: 'Counterparty is required' }, { status: 400 });
+    }
+    if (body.principal === undefined || (body.principal as number) <= 0) {
+      return HttpResponse.json({ error: 'Principal must be greater than 0' }, { status: 400 });
+    }
+    return HttpResponse.json({ id: 'created-loan-id' }, { status: 201 });
+  }),
+  http.put('*/loans/:id', async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    if (!body.counterparty || String(body.counterparty).trim().length === 0) {
+      return HttpResponse.json({ error: 'Counterparty is required' }, { status: 400 });
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
+  http.post('*/loans/:id/payments', async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    if (body.amount === undefined || (body.amount as number) <= 0) {
+      return HttpResponse.json({ error: 'Amount must be greater than 0' }, { status: 400 });
+    }
+    return HttpResponse.json({ id: 'created-loan-payment-id' }, { status: 201 });
+  }),
+  http.delete('*/loans/:id/payments/:paymentId', () => new HttpResponse(null, { status: 204 })),
+  http.delete('*/loans/:id', () => new HttpResponse(null, { status: 204 })),
+  http.post('*/loans/:id/unarchive', () => new HttpResponse(null, { status: 204 })),
   http.get('*/fx-rates', ({ request }) => {
     const url = new URL(request.url);
     const page = Number(url.searchParams.get('page') ?? '1');

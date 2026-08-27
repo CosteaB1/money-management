@@ -28,7 +28,9 @@ internal sealed class ImportDataCommandHandler(IBackupStore backupStore)
             document.Budgets is null ||
             document.BudgetPeriods is null ||
             document.SavingsGoals is null ||
-            document.SavingsGoalContributions is null)
+            document.SavingsGoalContributions is null ||
+            document.Loans is null ||
+            document.LoanPayments is null)
         {
             return Result.Failure<ImportDataResult>(
                 DataErrors.MalformedBackup("One or more entity arrays are missing from the backup."));
