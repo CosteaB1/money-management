@@ -27,6 +27,7 @@ const loan: LoanDto = {
   missingFxRate: false,
   status: 'Active',
   paymentCount: 2,
+  isAccountLinked: false,
   notes: 'Borrowed for the car',
 };
 

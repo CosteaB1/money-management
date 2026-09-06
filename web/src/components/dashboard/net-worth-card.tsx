@@ -1,56 +1,65 @@
 'use client';
 
 import { TrendingUp } from 'lucide-react';
-import Link from 'next/link';
-import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/card';
-import { useAccounts } from '@/src/lib/api/accounts';
+import { countLabel, MissingFxNote, StatCard } from '@/src/components/dashboard/stat-card';
+import { useNetWorth } from '@/src/lib/api/dashboard';
 import { formatMoney } from '@/src/lib/utils/currency';
 
+/**
+ * The third of the three headline tiles: what the user is actually worth.
+ *
+ * This card used to sum `balanceMdl` across accounts in the browser,
+ * which counted borrowed money as if it were the user's own — with 134k
+ * MDL of outstanding personal loans it read 183k when the truth was 49k.
+ * The figure now comes from `GET /dashboard/net-worth`, which nets the
+ * loans out server-side:
+ *
+ *   netWorth = grossAssets − externalLiabilities + externalAssets
+ *
+ * Only loans whose disbursement was recorded against an account take
+ * part: an unlinked loan's cash never entered a tracked balance, so
+ * subtracting the obligation would push the total wrong the other way.
+ *
+ * Money lent out is only surfaced when it's non-zero: it's the rarer leg
+ * (the user usually has none), and a permanent "0.00 MDL owed to you"
+ * line is noise. It is always part of the arithmetic regardless — the
+ * server does the maths, the UI only decides what to show.
+ */
 export function NetWorthCard() {
-  const { data, isLoading, isError } = useAccounts(false);
+  const { data, isLoading, isError } = useNetWorth();
 
-  const netWorth = data?.reduce((sum, account) => sum + (account.balanceMdl ?? 0), 0) ?? 0;
-  const missingCount = data?.filter((a) => a.balanceMdl === null).length ?? 0;
+  // Two independent sources can be short an FX rate, and they understate
+  // opposite sides of the equation (a missing account rate makes net
+  // worth too low, a missing loan rate makes it too high). Name both so
+  // the user knows which way the number is wrong, not just that it is.
+  const missingParts: string[] = [];
+  if (data && data.accountsMissingFxRate > 0) {
+    missingParts.push(countLabel(data.accountsMissingFxRate, 'account'));
+  }
+  if (data && data.loansMissingFxRate > 0) {
+    missingParts.push(countLabel(data.loansMissingFxRate, 'loan'));
+  }
 
   return (
-    <Card data-testid="net-worth-card" className="h-full">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center justify-between text-sm font-medium text-muted-foreground">
-          <span>Net worth</span>
-          <TrendingUp className="h-4 w-4" aria-hidden />
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {isError ? (
-          <p className="text-sm text-destructive">Failed to load.</p>
-        ) : isLoading || !data ? (
-          <div
-            className="h-10 w-32 animate-pulse rounded bg-muted"
-            role="status"
-            aria-label="Loading"
-          />
-        ) : (
-          <p
-            className="text-3xl font-semibold tracking-tight tabular-nums"
-            data-testid="net-worth-amount"
-          >
-            {formatMoney(netWorth, 'MDL')}
-          </p>
-        )}
-        <p className="mt-2 text-xs text-muted-foreground">
-          Sum of all non-archived account balances in MDL.
+    <StatCard
+      title="Net worth"
+      icon={TrendingUp}
+      amountMdl={data?.netWorthMdl ?? 0}
+      caption="Everything you own minus everything you owe, in MDL."
+      isLoading={isLoading || !data}
+      isError={isError}
+      testId="net-worth"
+    >
+      {data && data.externalAssetsMdl > 0 && (
+        <p className="mt-2 text-xs text-muted-foreground" data-testid="net-worth-external-assets">
+          Includes {formatMoney(data.externalAssetsMdl, 'MDL')} lent out and still owed to you.
         </p>
-        {missingCount > 0 && (
-          <p
-            className="mt-2 text-xs text-amber-600 dark:text-amber-400"
-            data-testid="net-worth-missing-rates"
-          >
-            <Link href="/settings/fx-rates" className="underline underline-offset-2">
-              {missingCount} account{missingCount === 1 ? '' : 's'} missing FX rate
-            </Link>
-          </p>
-        )}
-      </CardContent>
-    </Card>
+      )}
+      {missingParts.length > 0 && (
+        <MissingFxNote testId="net-worth-missing-rates">
+          {missingParts.join(' and ')} missing FX rate — net worth is incomplete
+        </MissingFxNote>
+      )}
+    </StatCard>
   );
 }

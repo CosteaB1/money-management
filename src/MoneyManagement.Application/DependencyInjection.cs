@@ -3,6 +3,7 @@ using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
 using MoneyManagement.Application.Abstractions.Behaviors;
 using MoneyManagement.Application.Abstractions.Messaging;
+using MoneyManagement.Application.Abstractions.NetWorth;
 using MoneyManagement.SharedKernel;
 
 namespace MoneyManagement.Application;
@@ -25,6 +26,12 @@ public static class DependencyInjection
                 .AsImplementedInterfaces()
                 .WithScopedLifetime()
             .AddClasses(c => c.AssignableTo(typeof(IDomainEventHandler<>)), publicOnly: false)
+                .AsImplementedInterfaces()
+                .WithScopedLifetime()
+            // Not covered by the handler clauses above: claim sources implement
+            // no messaging interface, they are collaborators the read handlers
+            // depend on. Scoped because they query the request's DbContext.
+            .AddClasses(c => c.AssignableTo<IExternalClaimSource>(), publicOnly: false)
                 .AsImplementedInterfaces()
                 .WithScopedLifetime());
 

@@ -7,9 +7,10 @@ namespace MoneyManagement.Api.Tests;
 
 /// <summary>
 /// Endpoint coverage for <c>/dashboard</c>: summary (default month + explicit
-/// month + malformed-month 400) and net-worth-trend (default + explicit months +
-/// out-of-range 400). These exercise the large Application projection handlers
-/// and the EfFxConverter conversion path.
+/// month + malformed-month 400), net-worth (shape + the claim identity), and
+/// net-worth-trend (default + explicit months + out-of-range 400). These
+/// exercise the large Application projection handlers and the EfFxConverter
+/// conversion path.
 /// </summary>
 [Collection(ApiCollection.Name)]
 public sealed class DashboardEndpointTests(CustomWebApplicationFactory factory)
@@ -63,6 +64,23 @@ public sealed class DashboardEndpointTests(CustomWebApplicationFactory factory)
         HttpResponseMessage response = await Client.GetAsync("/dashboard/summary?month=2024-07");
         using JsonDocument doc = await _fx.ReadDocAsync(response);
         doc.RootElement.GetProperty("income").GetDecimal().Should().BeGreaterThanOrEqualTo(123m);
+    }
+
+    [Fact]
+    public async Task Net_worth_returns_shape_and_satisfies_the_identity()
+    {
+        HttpResponseMessage response = await Client.GetAsync("/dashboard/net-worth");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using JsonDocument doc = await _fx.ReadDocAsync(response);
+        decimal gross = doc.RootElement.GetProperty("grossAssetsMdl").GetDecimal();
+        decimal liabilities = doc.RootElement.GetProperty("externalLiabilitiesMdl").GetDecimal();
+        decimal externalAssets = doc.RootElement.GetProperty("externalAssetsMdl").GetDecimal();
+        decimal netWorth = doc.RootElement.GetProperty("netWorthMdl").GetDecimal();
+
+        netWorth.Should().Be(gross - liabilities + externalAssets);
+        doc.RootElement.TryGetProperty("accountsMissingFxRate", out _).Should().BeTrue();
+        doc.RootElement.TryGetProperty("loansMissingFxRate", out _).Should().BeTrue();
     }
 
     [Fact]

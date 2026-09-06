@@ -26,7 +26,10 @@ export const loanKeys = {
  * Mirrors `useCreateTransfer` in ./transactions — loan-linked legs are
  * transfer-flagged transactions, so they shift account balances (which
  * feed the dashboard, balance-over-time reports, and linked-mode goals'
- * `saved`) and add rows to the transactions list. Budgets exclude
+ * `saved`) and add rows to the transactions list. `['dashboard']` is
+ * doubly load-bearing since the net-worth tiles landed: a repayment
+ * shrinks both the account balance and the outstanding loan, and both
+ * terms live in `GET /dashboard/net-worth`. Budgets exclude
  * transfer legs server-side but are invalidated defensively, same as the
  * transfer hook. Applied unconditionally — simplest correct approach —
  * so an unlinked mutation just triggers a few cheap no-op refetches.
@@ -108,6 +111,11 @@ export function useUpdateLoan(id: string) {
  * Soft-archives a loan (DELETE /loans/{id} → 204). Archiving hides the
  * loan from the list but keeps its transactions and payment history —
  * nothing money-side changes, so only `['loans']` is invalidated.
+ *
+ * Not even the net-worth tiles: `GET /dashboard/net-worth` deliberately
+ * counts archived loans (a debt hidden from the UI is still a debt), so
+ * the dashboard is unmoved by archiving. This is the one place where the
+ * /loans summary tiles and the dashboard are allowed to disagree.
  */
 export function useArchiveLoan() {
   const queryClient = useQueryClient();

@@ -107,6 +107,17 @@ public class GetNetWorthTrendQueryHandlerTests
         return clock;
     }
 
+    /// <summary>
+    /// Trend handler with no external claims — the account-only baseline these
+    /// cases were written against. The claim-aware cases live in
+    /// <see cref="NetWorthTrendClaimDeductionTests"/>.
+    /// </summary>
+    private static GetNetWorthTrendQueryHandler Handler(
+        IApplicationDbContext db,
+        IFxConverter fx,
+        DateTime utcNow) =>
+        new(db, fx, FakeExternalClaimSource.Empty(), Clock(utcNow));
+
     [Fact]
     public async Task Handle_MonthsOne_ReturnsSinglePointAtToday()
     {
@@ -114,7 +125,7 @@ public class GetNetWorthTrendQueryHandlerTests
         Account a = NewAccount("Wallet", "MDL", 1_000m);
 
         IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [a]);
-        var handler = new GetNetWorthTrendQueryHandler(db, IdentityConverter(), Clock(now));
+        GetNetWorthTrendQueryHandler handler = Handler(db, IdentityConverter(), now);
 
         Result<IReadOnlyList<NetWorthTrendPointDto>> result = await handler.Handle(
             new GetNetWorthTrendQuery(1), CancellationToken.None);
@@ -133,7 +144,7 @@ public class GetNetWorthTrendQueryHandlerTests
         Account a = NewAccount("Wallet", "MDL", 1_000m);
 
         IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [a]);
-        var handler = new GetNetWorthTrendQueryHandler(db, IdentityConverter(), Clock(now));
+        GetNetWorthTrendQueryHandler handler = Handler(db, IdentityConverter(), now);
 
         Result<IReadOnlyList<NetWorthTrendPointDto>> result = await handler.Handle(
             new GetNetWorthTrendQuery(3), CancellationToken.None);
@@ -155,7 +166,7 @@ public class GetNetWorthTrendQueryHandlerTests
         archived.Archive();
 
         IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [live, archived]);
-        var handler = new GetNetWorthTrendQueryHandler(db, IdentityConverter(), Clock(now));
+        GetNetWorthTrendQueryHandler handler = Handler(db, IdentityConverter(), now);
 
         Result<IReadOnlyList<NetWorthTrendPointDto>> result = await handler.Handle(
             new GetNetWorthTrendQuery(1), CancellationToken.None);
@@ -177,7 +188,7 @@ public class GetNetWorthTrendQueryHandlerTests
         IApplicationDbContext db = FakeApplicationDbContext.Create(
             accounts: [a], transactions: [feb, apr]);
 
-        var handler = new GetNetWorthTrendQueryHandler(db, IdentityConverter(), Clock(now));
+        GetNetWorthTrendQueryHandler handler = Handler(db, IdentityConverter(), now);
 
         // months = 4 -> Feb-end, Mar-end, Apr-end, today (May).
         Result<IReadOnlyList<NetWorthTrendPointDto>> result = await handler.Handle(
@@ -207,10 +218,7 @@ public class GetNetWorthTrendQueryHandlerTests
         Account usd = NewAccount("USD wallet", "USD", 100m);
 
         IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [usd]);
-        var handler = new GetNetWorthTrendQueryHandler(
-            db,
-            UsdMdlConverterAfter(new DateOnly(2026, 4, 1), 17m),
-            Clock(now));
+        GetNetWorthTrendQueryHandler handler = Handler(db, UsdMdlConverterAfter(new DateOnly(2026, 4, 1), 17m), now);
 
         // months = 3 -> Mar-end (no rate), Apr-end (rate), today (May).
         Result<IReadOnlyList<NetWorthTrendPointDto>> result = await handler.Handle(
@@ -242,7 +250,7 @@ public class GetNetWorthTrendQueryHandlerTests
         IApplicationDbContext db = FakeApplicationDbContext.Create(
             accounts: [a], transactions: [late]);
 
-        var handler = new GetNetWorthTrendQueryHandler(db, IdentityConverter(), Clock(now));
+        GetNetWorthTrendQueryHandler handler = Handler(db, IdentityConverter(), now);
 
         // months = 2 -> Apr-end + today.
         Result<IReadOnlyList<NetWorthTrendPointDto>> result = await handler.Handle(
@@ -260,7 +268,7 @@ public class GetNetWorthTrendQueryHandlerTests
     public async Task Handle_MonthsZero_ReturnsFailure()
     {
         IApplicationDbContext db = FakeApplicationDbContext.Create();
-        var handler = new GetNetWorthTrendQueryHandler(db, IdentityConverter(), Clock(DateTime.UtcNow));
+        GetNetWorthTrendQueryHandler handler = Handler(db, IdentityConverter(), DateTime.UtcNow);
 
         Result<IReadOnlyList<NetWorthTrendPointDto>> result = await handler.Handle(
             new GetNetWorthTrendQuery(0), CancellationToken.None);
@@ -273,7 +281,7 @@ public class GetNetWorthTrendQueryHandlerTests
     public async Task Handle_MonthsTwentyFive_ReturnsFailure()
     {
         IApplicationDbContext db = FakeApplicationDbContext.Create();
-        var handler = new GetNetWorthTrendQueryHandler(db, IdentityConverter(), Clock(DateTime.UtcNow));
+        GetNetWorthTrendQueryHandler handler = Handler(db, IdentityConverter(), DateTime.UtcNow);
 
         Result<IReadOnlyList<NetWorthTrendPointDto>> result = await handler.Handle(
             new GetNetWorthTrendQuery(25), CancellationToken.None);

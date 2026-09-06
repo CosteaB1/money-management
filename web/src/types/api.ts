@@ -544,6 +544,36 @@ export interface NetWorthTrendPointDto {
 }
 
 /**
+ * GET /dashboard/net-worth — the headline figures behind the three
+ * dashboard tiles (Total assets / I owe / Net worth).
+ *
+ * Computed server-side because a client-side sum of account balances
+ * silently ignores personal loans: money the user borrowed still sits in
+ * an account (inflating gross assets) even though it is owed back.
+ *
+ *   netWorthMdl = grossAssetsMdl - externalLiabilitiesMdl + externalAssetsMdl
+ *
+ * Both loan legs are reported as POSITIVE magnitudes — the sign lives in
+ * the formula above, not in the values. Amounts that could not be
+ * FX-converted contribute 0 and are counted in `accountsMissingFxRate` /
+ * `loansMissingFxRate`, so the UI can flag *which* total is incomplete.
+ */
+export interface NetWorthDto {
+  /** Sum of non-archived account balances, in MDL. */
+  grossAssetsMdl: number;
+  /** Sum of outstanding on loans the user borrowed ("I owe"), positive, in MDL. */
+  externalLiabilitiesMdl: number;
+  /** Sum of outstanding on loans the user lent out ("owed to me"), positive, in MDL. */
+  externalAssetsMdl: number;
+  /** `grossAssetsMdl - externalLiabilitiesMdl + externalAssetsMdl`. May be negative. */
+  netWorthMdl: number;
+  /** Count of accounts whose balance could not be converted to MDL. */
+  accountsMissingFxRate: number;
+  /** Count of loans whose outstanding could not be converted to MDL. */
+  loansMissingFxRate: number;
+}
+
+/**
  * Status of a budget for a given month. Backend pre-computes the bucket
  * from `spent / monthlyLimit`:
  *   - `OnTrack` → < 80% spent
@@ -963,6 +993,16 @@ export interface LoanDto {
   missingFxRate: boolean;
   status: LoanStatus;
   paymentCount: number;
+  /**
+   * True when the loan's disbursement was recorded against a real account,
+   * i.e. the principal actually moved through a tracked balance.
+   *
+   * Load-bearing for net worth: `GET /dashboard/net-worth` only counts
+   * account-linked loans. An unlinked loan's cash never entered gross
+   * assets, so subtracting the obligation would push the total wrong in
+   * the opposite direction.
+   */
+  isAccountLinked: boolean;
   notes: string | null;
   /**
    * Soft-delete flag. Archived rows only appear in the list when it is

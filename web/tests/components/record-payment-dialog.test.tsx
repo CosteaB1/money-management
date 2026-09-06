@@ -30,6 +30,7 @@ const eurLoan: LoanDto = {
   missingFxRate: false,
   status: 'Active',
   paymentCount: 2,
+  isAccountLinked: false,
   notes: null,
 };
 
@@ -47,6 +48,7 @@ const mdlLoan: LoanDto = {
   missingFxRate: false,
   status: 'Active',
   paymentCount: 1,
+  isAccountLinked: true,
   notes: null,
 };
 

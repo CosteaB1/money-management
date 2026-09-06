@@ -13,47 +13,72 @@ function renderWithClient(ui: ReactElement) {
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }
 
+/** A complete NetWorthDto body with the missing-FX counts dialled in. */
+function netWorthBody(accountsMissing: number, loansMissing: number) {
+  return {
+    grossAssetsMdl: 48100,
+    externalLiabilitiesMdl: 57600,
+    externalAssetsMdl: 2000,
+    netWorthMdl: -7500,
+    accountsMissingFxRate: accountsMissing,
+    loansMissingFxRate: loansMissing,
+  };
+}
+
 describe('NetWorthCard states', () => {
   it('shows the loading skeleton while pending', async () => {
     server.use(
-      http.get('*/accounts', async () => {
+      http.get('*/dashboard/net-worth', async () => {
         await new Promise((r) => setTimeout(r, 40));
-        return HttpResponse.json([]);
+        return HttpResponse.json(netWorthBody(0, 0));
       }),
     );
     renderWithClient(<NetWorthCard />);
     expect(screen.getByRole('status', { name: 'Loading' })).toBeInTheDocument();
+    await screen.findByTestId('net-worth-amount');
   });
 
   it('shows an error message on failure', async () => {
-    server.use(http.get('*/accounts', () => HttpResponse.json({}, { status: 500 })));
+    server.use(http.get('*/dashboard/net-worth', () => HttpResponse.json({}, { status: 500 })));
     renderWithClient(<NetWorthCard />);
     expect(await screen.findByText('Failed to load.')).toBeInTheDocument();
   });
 
-  it('links to FX settings when accounts are missing a rate', async () => {
-    server.use(
-      http.get('*/accounts', () =>
-        HttpResponse.json([
-          {
-            id: 'a1',
-            name: 'USD no rate',
-            type: 'Brokerage',
-            currency: 'USD',
-            openingDate: '2025-01-01',
-            isArchived: false,
-            notes: null,
-            balance: 100,
-            balanceMdl: null,
-          },
-        ]),
-      ),
-    );
+  // A missing account rate understates net worth; a missing loan rate
+  // overstates it. The card names the source(s) so the user knows which
+  // way the figure is off, and links to the page that fixes it.
+  it('names accounts as the incomplete source', async () => {
+    server.use(http.get('*/dashboard/net-worth', () => HttpResponse.json(netWorthBody(2, 0))));
     renderWithClient(<NetWorthCard />);
-    const link = await screen.findByTestId('net-worth-missing-rates');
-    expect(link).toHaveTextContent('1 account missing FX rate');
+
+    const note = await screen.findByTestId('net-worth-missing-rates');
+    expect(note).toHaveTextContent('2 accounts missing FX rate — net worth is incomplete');
     await waitFor(() => {
       expect(screen.getByRole('link')).toHaveAttribute('href', '/settings/fx-rates');
     });
+  });
+
+  it('names loans as the incomplete source, singularised', async () => {
+    server.use(http.get('*/dashboard/net-worth', () => HttpResponse.json(netWorthBody(0, 1))));
+    renderWithClient(<NetWorthCard />);
+
+    const note = await screen.findByTestId('net-worth-missing-rates');
+    expect(note).toHaveTextContent('1 loan missing FX rate — net worth is incomplete');
+  });
+
+  it('names both sources when accounts and loans are each short a rate', async () => {
+    server.use(http.get('*/dashboard/net-worth', () => HttpResponse.json(netWorthBody(1, 3))));
+    renderWithClient(<NetWorthCard />);
+
+    const note = await screen.findByTestId('net-worth-missing-rates');
+    expect(note).toHaveTextContent(
+      '1 account and 3 loans missing FX rate — net worth is incomplete',
+    );
+  });
+
+  it('stays quiet when every rate is available', async () => {
+    renderWithClient(<NetWorthCard />);
+    await screen.findByTestId('net-worth-amount');
+    expect(screen.queryByTestId('net-worth-missing-rates')).not.toBeInTheDocument();
   });
 });

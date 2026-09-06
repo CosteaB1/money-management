@@ -1,6 +1,7 @@
 using FluentAssertions;
 using MoneyManagement.Application.Abstractions.Data;
 using MoneyManagement.Application.Features.Dashboard.GetNetWorthTrend;
+using MoneyManagement.Application.Features.Loans;
 using MoneyManagement.Application.Tests.TestSupport;
 using MoneyManagement.Domain.Accounts;
 using MoneyManagement.Domain.Common;
@@ -45,8 +46,10 @@ public sealed class NetWorthTrendFilterDisciplineTests
         return result.Value;
     }
 
+    // No loans in these fixtures, so the real claim source contributes nothing
+    // — the assertions below stay pure account arithmetic.
     private static GetNetWorthTrendQueryHandler Handler(IApplicationDbContext db) =>
-        new(db, FakeFxConverter.Identity(), Clock());
+        new(db, FakeFxConverter.Identity(), new LoanExternalClaimSource(db), Clock());
 
     [Fact]
     public async Task NetWorth_IncludesTransfersAndAdjustments_InTheBalance()

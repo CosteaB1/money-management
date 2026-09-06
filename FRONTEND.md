@@ -291,7 +291,12 @@ src/
                                  # "This will also delete the linked transaction on <account>." only
                                  # when transactionId non-null; newest-first as delivered by API),
                                  # loan-detail-skeleton + loan-detail-error
-    dashboard/                   # net-worth-card (sums balanceMdl + missing-rate warning),
+    dashboard/                   # stat-card (shared tile shell: title/icon/amount/caption +
+                                 #   MissingFxNote + countLabel — the three headline tiles
+                                 #   render through it so there is one skeleton + one error copy),
+                                 # total-assets-card / i-owe-card / net-worth-card
+                                 #   (all three read GET /dashboard/net-worth via useNetWorth();
+                                 #   net-worth-card no longer sums balanceMdl client-side),
                                  # account-card (native + MDL-eq line), recent-transactions,
                                  # monthly-summary-card (built: income/expense/net + savings rate,
                                  # current UTC month, missing-FX warning),
@@ -622,4 +627,6 @@ When a change spans both stacks, dispatch both agents in parallel from the main 
 | 3 — transfers | New "New transfer" dialog (MDL-only v1) next to "Add transaction"; transfer-flag toggle on add-transaction dialog (with counter-account picker); transfer tri-state filter on transactions page; Transfer badge + muted styling on transfer rows; per-row "Transfer" checkbox in import preview seeded by backend auto-suggest, plus an OPTIONAL counter-account dropdown next to it. Leave blank for A2A between accounts that both have PDFs (the other statement supplies the matching leg). Pick a counter to auto-create a matching leg on the chosen account — useful for ATM → Cash, Salary → XTB/Binance/Fagura, or any transfer where the destination has no statement. Dropdown is filtered by same currency, excludes the import account and archived accounts; no preselection, no submit blocking | `transactions/create-transfer-dialog.tsx`, `transactions/transactions-filters.tsx`, `transactions/transactions-table.tsx`, `transactions/import-preview.tsx` |
 | 4 — multi-currency tx + balance adjustments | Amount label in add-transaction reflects selected account's currency; "Update balance" action in accounts-table row menu (only for Brokerage/CryptoExchange/P2PLending/BankDeposit) opens the balance-adjustment dialog; adjustment badge + muted styling on adjustment rows; adjustment tri-state filter; transactions display native currency with optional MDL-eq secondary line | `accounts/update-balance-dialog.tsx`, `accounts/accounts-table.tsx`, `transactions/transactions-table.tsx`, `dashboard/recent-transactions.tsx` |
 
-**Aggregate-side trap**: any client-side or server-side income/expense aggregation must filter both `isTransfer === true` AND `isAdjustment === true`. Net-worth-card sums account balances (not transactions) so it's safe; the new `MonthlySummaryCard` and `NetWorthTrendChart` consume the backend's `/dashboard/summary` and `/dashboard/net-worth-trend` endpoints, which already exclude transfers and adjustments server-side — no client-side filtering needed.
+**Aggregate-side trap**: any client-side or server-side income/expense aggregation must filter both `isTransfer === true` AND `isAdjustment === true`. `MonthlySummaryCard` consumes `/dashboard/summary`, which excludes transfers and adjustments server-side — no client-side filtering needed.
+
+> **Corrected 2026-09-06.** This note used to claim that (a) net-worth-card "sums account balances (not transactions) so it's safe" and (b) `/dashboard/net-worth-trend` "already excludes transfers and adjustments server-side". Both were wrong. The trend deliberately includes transfer and adjustment rows — they move real balances — and pins that behaviour with `NetWorthTrendFilterDisciplineTests`, which exists precisely to stop someone "fixing" the code to match this paragraph. And the client-side sum was not safe: it counted borrowed money as wealth. There is no client-side money aggregation on the dashboard any more; all three headline tiles read a single server-computed `NetWorthDto`.

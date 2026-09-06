@@ -49,6 +49,7 @@ export function LoanDetailHeader({ loan }: Props) {
     missingFxRate: loan.missingFxRate,
     status: loan.status,
     paymentCount: loan.paymentCount,
+    isAccountLinked: loan.disbursementTransactionId !== null,
     notes: loan.notes,
     isArchived: loan.isArchived,
   };

@@ -102,6 +102,33 @@ public class GetLoansQueryHandlerTests
     }
 
     [Fact]
+    public async Task Handle_LoanWithDisbursementTransaction_IsAccountLinked()
+    {
+        // Net worth only nets out account-linked loans, so the list has to say
+        // which ones qualify.
+        Loan loan = NewLoan();
+        loan.SetDisbursementTransaction(Guid.CreateVersion7());
+        IApplicationDbContext db = FakeApplicationDbContext.Create(loans: [loan]);
+        var handler = new GetLoansQueryHandler(db, FakeFxConverter.Identity(), Clock());
+
+        Result<IReadOnlyList<LoanDto>> result = await handler.Handle(new GetLoansQuery(), CancellationToken.None);
+
+        result.Value.Single().IsAccountLinked.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Handle_LoanWithoutDisbursementTransaction_IsNotAccountLinked()
+    {
+        Loan loan = NewLoan();
+        IApplicationDbContext db = FakeApplicationDbContext.Create(loans: [loan]);
+        var handler = new GetLoansQueryHandler(db, FakeFxConverter.Identity(), Clock());
+
+        Result<IReadOnlyList<LoanDto>> result = await handler.Handle(new GetLoansQuery(), CancellationToken.None);
+
+        result.Value.Single().IsAccountLinked.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Handle_LoanWithNoPayments_HasZeroRepaidAndFullOutstanding()
     {
         Loan loan = NewLoan(principal: 2_500m);

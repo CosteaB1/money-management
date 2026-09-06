@@ -9,6 +9,13 @@ namespace MoneyManagement.Application.Features.Loans;
 /// <see cref="OutstandingMdl"/> is the reporting-currency conversion at
 /// today's rate — <c>null</c> (with <see cref="MissingFxRate"/> flipped) when
 /// no usable rate exists, same contract as <c>AccountDto.BalanceMdl</c>.
+/// <para>
+/// <see cref="IsAccountLinked"/> is true when the disbursement was booked
+/// against a tracked account, so the borrowed/lent cash already sits inside the
+/// account balances. Net worth only nets out account-linked loans — an unlinked
+/// one never moved a tracked balance, so subtracting it would skew the total
+/// the other way.
+/// </para>
 /// </summary>
 public sealed record LoanDto(
     Guid Id,
@@ -24,4 +31,5 @@ public sealed record LoanDto(
     LoanStatus Status,
     int PaymentCount,
     string? Notes,
-    bool IsArchived);
+    bool IsArchived,
+    bool IsAccountLinked);

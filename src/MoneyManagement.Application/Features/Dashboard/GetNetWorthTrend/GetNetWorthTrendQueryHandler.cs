@@ -3,9 +3,10 @@ using Microsoft.EntityFrameworkCore;
 using MoneyManagement.Application.Abstractions.Data;
 using MoneyManagement.Application.Abstractions.FxRates;
 using MoneyManagement.Application.Abstractions.Messaging;
+using MoneyManagement.Application.Abstractions.NetWorth;
+using MoneyManagement.Application.Features.Accounts;
 using MoneyManagement.Domain.Accounts;
 using MoneyManagement.Domain.Common;
-using MoneyManagement.Domain.Transactions;
 using MoneyManagement.SharedKernel;
 
 namespace MoneyManagement.Application.Features.Dashboard.GetNetWorthTrend;
@@ -16,6 +17,7 @@ namespace MoneyManagement.Application.Features.Dashboard.GetNetWorthTrend;
 /// <item>For past months, the as-of date is the last day of that month (UTC).</item>
 /// <item>For the current month, the as-of date is "now" so the latest point is live.</item>
 /// <item>Each point sums every non-archived account's native balance (anchor + Σ income − Σ expense over rows ≤ asOf), FX-converted to MDL at that as-of date.</item>
+/// <item>Each point then deducts the external claims outstanding at that same as-of date, so borrowed money never reads as wealth.</item>
 /// </list>
 /// Mirrors <c>GetAccountsQueryHandler</c>'s balance arithmetic — non-deleted
 /// transactions only; transfers, adjustments and fees all contribute.
@@ -23,6 +25,7 @@ namespace MoneyManagement.Application.Features.Dashboard.GetNetWorthTrend;
 internal sealed class GetNetWorthTrendQueryHandler(
     IApplicationDbContext db,
     IFxConverter fxConverter,
+    IExternalClaimSource claimSource,
     IDateTimeProvider clock)
     : IQueryHandler<GetNetWorthTrendQuery, IReadOnlyList<NetWorthTrendPointDto>>
 {
@@ -42,26 +45,22 @@ internal sealed class GetNetWorthTrendQueryHandler(
         DateTime now = clock.UtcNow;
         var today = DateOnly.FromDateTime(now);
 
-        // The full per-account, per-direction transaction sum, partitioned by
-        // transaction date. We materialize all non-deleted rows once and slice
-        // them in memory for each as-of date — far cheaper than running N
-        // GROUP BY queries against Postgres, and N is bounded at 24.
-        var txRows = await db.Transactions
-            .Where(t => !t.IsDeleted)
-            .Select(t => new
-            {
-                t.AccountId,
-                t.Direction,
-                t.TransactionDate,
-                AmountValue = t.Amount.Amount,
-            })
-            .ToListAsync(cancellationToken);
+        // The full per-account, per-direction transaction history. We
+        // materialize all non-deleted rows once and slice them in memory for
+        // each as-of date — far cheaper than running N GROUP BY queries against
+        // Postgres, and N is bounded at 24.
+        AccountBalanceLedger ledger = await AccountBalanceLedger.LoadAsync(db, cancellationToken);
 
         // Non-archived accounts only — mirrors what the dashboard caller
         // expects (archived accounts hide from the dashboard per WIKI.md).
         List<Account> accounts = await db.Accounts
             .Where(a => !a.IsArchived)
             .ToListAsync(cancellationToken);
+
+        // Same one-shot rule for the claims: their whole settlement history is
+        // fetched once and re-sliced per point. A per-point query would turn one
+        // round-trip into 24.
+        IReadOnlyList<ExternalClaim> claims = await claimSource.GetHistoryAsync(cancellationToken);
 
         // Build the list of as-of dates, oldest first.
         //
@@ -97,29 +96,7 @@ internal sealed class GetNetWorthTrendQueryHandler(
                     continue;
                 }
 
-                decimal income = 0m;
-                decimal expense = 0m;
-                foreach (var t in txRows)
-                {
-                    if (t.AccountId != account.Id)
-                    {
-                        continue;
-                    }
-                    if (t.TransactionDate > asOf)
-                    {
-                        continue;
-                    }
-                    if (t.Direction == TransactionDirection.Income)
-                    {
-                        income += t.AmountValue;
-                    }
-                    else
-                    {
-                        expense += t.AmountValue;
-                    }
-                }
-
-                decimal nativeBalance = account.Balance.Amount + income - expense;
+                decimal nativeBalance = ledger.NativeBalanceAsOf(account, asOf);
 
                 decimal? converted = await fxConverter.ConvertAsync(
                     nativeBalance,
@@ -135,6 +112,40 @@ internal sealed class GetNetWorthTrendQueryHandler(
                 }
 
                 netWorthMdl += converted.Value;
+            }
+
+            // Now net out the obligations. OutstandingAsOf is the claim-side
+            // equivalent of the opening-date guard above: a claim that did not
+            // exist yet on `asOf`, or was fully settled by then, returns a
+            // non-positive figure and drops out. Payments made AFTER the point
+            // deliberately don't shrink it.
+            //
+            // Conversion happens at the point's OWN date, never at today's rate
+            // — the same discipline the account leg above follows.
+            foreach (ExternalClaim claim in claims)
+            {
+                decimal outstanding = claim.OutstandingAsOf(asOf);
+                if (outstanding <= 0m)
+                {
+                    continue;
+                }
+
+                decimal? convertedClaim = await fxConverter.ConvertAsync(
+                    outstanding,
+                    claim.Currency,
+                    ReportingCurrencies.Mdl,
+                    asOf,
+                    cancellationToken);
+
+                if (convertedClaim is null)
+                {
+                    missing = true;
+                    continue;
+                }
+
+                netWorthMdl += claim.Side == ExternalClaimSide.ReducesNetWorth
+                    ? -convertedClaim.Value
+                    : convertedClaim.Value;
             }
 
             // Point label: for the live point use today's month; for past

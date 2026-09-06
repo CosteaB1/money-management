@@ -28,6 +28,7 @@ function makeLoan(overrides: Partial<LoanDto>): LoanDto {
     missingFxRate: overrides.missingFxRate ?? false,
     status: overrides.status ?? 'Active',
     paymentCount: overrides.paymentCount ?? 0,
+    isAccountLinked: overrides.isAccountLinked ?? false,
     notes: overrides.notes ?? null,
   };
 }

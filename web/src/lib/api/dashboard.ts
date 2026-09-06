@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import type { DashboardSummaryDto, NetWorthTrendPointDto } from '@/src/types/api';
+import type { DashboardSummaryDto, NetWorthDto, NetWorthTrendPointDto } from '@/src/types/api';
 import { apiClient } from './client';
 
 /**
@@ -11,13 +11,16 @@ import { apiClient } from './client';
  * existing invalidations in `useCreateTransaction`, `useAdjustBalance`, and
  * `useImportCommit` — which all call
  * `invalidateQueries({ queryKey: ['dashboard'] })` — cascade to the
- * summary and trend hooks defined here. Do NOT change the root prefix
- * without updating those mutations in lockstep.
+ * summary, trend, and net-worth hooks defined here. The loan mutations in
+ * ./loans invalidate the same root, which is what keeps the net-worth
+ * tiles honest after a repayment. Do NOT change the root prefix without
+ * updating those mutations in lockstep.
  */
 export const dashboardKeys = {
   all: ['dashboard'] as const,
   summary: (month?: string) => ['dashboard', 'summary', month ?? 'current'] as const,
   trend: (months: number) => ['dashboard', 'net-worth-trend', months] as const,
+  netWorth: () => ['dashboard', 'net-worth'] as const,
 };
 
 /**
@@ -49,5 +52,25 @@ export function useNetWorthTrend(months = 6) {
     queryKey: dashboardKeys.trend(months),
     queryFn: () =>
       apiClient.get<NetWorthTrendPointDto[]>(`/dashboard/net-worth-trend?months=${months}`),
+  });
+}
+
+/**
+ * GET /dashboard/net-worth — feeds the three headline dashboard tiles
+ * (Total assets / I owe / Net worth).
+ *
+ * Server-side on purpose: the old card summed `balanceMdl` across
+ * accounts in the browser, which counted borrowed money as if it were
+ * the user's own. The backend nets personal loans out of (and lent money
+ * back into) the total, and reports the per-source missing-FX counts so
+ * the UI can say which figure is incomplete.
+ *
+ * No parameters — the figures are always "as of now"; the historical view
+ * lives in `useNetWorthTrend`.
+ */
+export function useNetWorth() {
+  return useQuery({
+    queryKey: dashboardKeys.netWorth(),
+    queryFn: () => apiClient.get<NetWorthDto>('/dashboard/net-worth'),
   });
 }

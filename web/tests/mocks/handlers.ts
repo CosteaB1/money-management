@@ -10,6 +10,7 @@ import type {
   GoalDto,
   LoanDetailDto,
   LoanDto,
+  NetWorthDto,
   PagedResult,
   StatementPreviewDto,
   TransactionDto,
@@ -289,6 +290,7 @@ const loans: LoanDto[] = [
     missingFxRate: false,
     status: 'Active',
     paymentCount: 2,
+    isAccountLinked: false,
     notes: 'Borrowed for the car',
     isArchived: false,
   },
@@ -305,6 +307,7 @@ const loans: LoanDto[] = [
     missingFxRate: false,
     status: 'Active',
     paymentCount: 1,
+    isAccountLinked: true,
     notes: null,
     isArchived: false,
   },
@@ -321,6 +324,7 @@ const loans: LoanDto[] = [
     missingFxRate: false,
     status: 'Settled',
     paymentCount: 3,
+    isAccountLinked: false,
     notes: null,
     isArchived: false,
   },
@@ -342,6 +346,7 @@ const loans: LoanDto[] = [
     missingFxRate: false,
     status: 'Active',
     paymentCount: 1,
+    isAccountLinked: false,
     notes: null,
     isArchived: true,
   },
@@ -710,6 +715,28 @@ const goalDetails: Record<string, GoalDetailDto> = {
   },
 };
 
+// Net-worth seed for the three dashboard tiles. Round numbers rather than a
+// re-derivation of loans[]: the endpoint applies rules the list fixtures
+// don't model (archived loans still count — a hidden debt is still a debt —
+// while loans with no linked disbursement never do), so the tiles and the
+// /loans summary are allowed to disagree by design.
+//
+//   grossAssets          48100  (matches the accounts[] MDL balances)
+//   externalLiabilities  57600  (the borrowed EUR, as a POSITIVE magnitude)
+//   externalAssets        2000  (still owed to the user)
+//   netWorth             48100 - 57600 + 2000 = -7500
+//
+// Negative on purpose: the borrowed money outweighs the accounts, which is
+// exactly the case the old client-side account sum got wrong.
+const netWorth: NetWorthDto = {
+  grossAssetsMdl: 48100,
+  externalLiabilitiesMdl: 57600,
+  externalAssetsMdl: 2000,
+  netWorthMdl: -7500,
+  accountsMissingFxRate: 0,
+  loansMissingFxRate: 0,
+};
+
 export const handlers = [
   http.get('*/accounts', ({ request }) => {
     const url = new URL(request.url);
@@ -971,6 +998,7 @@ export const handlers = [
     ].slice(-months);
     return HttpResponse.json(series.map((p) => ({ ...p, missingFxRate: false })));
   }),
+  http.get('*/dashboard/net-worth', () => HttpResponse.json(netWorth)),
   http.post('*/budgets/rebuild-all-periods', () =>
     HttpResponse.json({ budgetsRebuilt: 3, periodsAffected: 5 }),
   ),

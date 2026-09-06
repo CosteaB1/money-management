@@ -33,6 +33,7 @@ const loan: LoanDto = {
   missingFxRate: false,
   status: 'Active',
   paymentCount: 1,
+  isAccountLinked: true,
   notes: null,
 };
 

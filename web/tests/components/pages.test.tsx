@@ -80,6 +80,30 @@ describe('App pages', () => {
     });
   });
 
+  // Row 1 is the net-worth equation spelled out. Assert all three tiles
+  // land and agree with each other — a single card showing gross assets
+  // under a "Net worth" label is the bug this layout exists to kill.
+  it('Dashboard page renders the three headline tiles in reading order', async () => {
+    renderWithClient(<DashboardPage />);
+
+    await screen.findByTestId('net-worth-amount');
+    const totalAssets = screen.getByTestId('total-assets-card');
+    const iOwe = screen.getByTestId('i-owe-dashboard-card');
+    const netWorth = screen.getByTestId('net-worth-card');
+
+    // Reading order left to right: assets, then what's owed, then the net.
+    const follows = Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(totalAssets.compareDocumentPosition(iOwe) & follows).toBeTruthy();
+    expect(iOwe.compareDocumentPosition(netWorth) & follows).toBeTruthy();
+
+    const gross = screen.getByTestId('total-assets-amount').textContent ?? '';
+    const owed = screen.getByTestId('i-owe-dashboard-amount').textContent ?? '';
+    const net = screen.getByTestId('net-worth-amount').textContent ?? '';
+    expect(gross).toMatch(/48\D?100/);
+    expect(owed).toMatch(/57\D?600/);
+    expect(net).toMatch(/7\D?500/);
+  });
+
   it('Accounts page renders header + table', async () => {
     renderWithClient(<AccountsPage />);
     expect(screen.getByRole('heading', { name: 'Accounts' })).toBeInTheDocument();

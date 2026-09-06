@@ -2,6 +2,7 @@ using System.Globalization;
 using MoneyManagement.Api.Endpoints;
 using MoneyManagement.Api.Extensions;
 using MoneyManagement.Application.Abstractions.Messaging;
+using MoneyManagement.Application.Features.Dashboard.GetNetWorth;
 using MoneyManagement.Application.Features.Dashboard.GetNetWorthTrend;
 using MoneyManagement.Application.Features.Dashboard.GetSummary;
 using MoneyManagement.SharedKernel;
@@ -15,6 +16,7 @@ public sealed class DashboardEndpoints : IEndpoint
         RouteGroupBuilder group = app.MapGroup("/dashboard").WithTags("Dashboard");
 
         group.MapGet("/summary", GetSummary);
+        group.MapGet("/net-worth", GetNetWorth);
         group.MapGet("/net-worth-trend", GetNetWorthTrend);
     }
 
@@ -46,6 +48,15 @@ public sealed class DashboardEndpoints : IEndpoint
         Result<DashboardSummaryDto> result = await handler.Handle(
             new GetSummaryQuery(parsed),
             cancellationToken);
+
+        return result.Match(Results.Ok);
+    }
+
+    private static async Task<IResult> GetNetWorth(
+        IQueryHandler<GetNetWorthQuery, NetWorthDto> handler,
+        CancellationToken cancellationToken)
+    {
+        Result<NetWorthDto> result = await handler.Handle(new GetNetWorthQuery(), cancellationToken);
 
         return result.Match(Results.Ok);
     }

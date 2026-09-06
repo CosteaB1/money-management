@@ -87,7 +87,8 @@ internal sealed class GetLoansQueryHandler(
                 Status: outstanding > 0m ? LoanStatus.Active : LoanStatus.Settled,
                 paymentCount,
                 loan.Notes,
-                loan.IsArchived));
+                loan.IsArchived,
+                IsAccountLinked: loan.DisbursementTransactionId is not null));
         }
 
         return Result.Success<IReadOnlyList<LoanDto>>(dtos);
