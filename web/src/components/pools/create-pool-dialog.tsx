@@ -30,7 +30,10 @@ import { Textarea } from '@/src/components/ui/textarea';
 import { useAccounts } from '@/src/lib/api/accounts';
 import { ApiError } from '@/src/lib/api/client';
 import { useCreatePool } from '@/src/lib/api/pools';
+import { cn } from '@/src/lib/utils/cn';
+import { formatMoney } from '@/src/lib/utils/currency';
 import { todayIsoUtc } from '@/src/lib/utils/date';
+import { roundPoolMoney } from '@/src/lib/utils/pool';
 import type { AccountType, BackdatedSubscriptionRequest } from '@/src/types/api';
 
 const today = () => todayIsoUtc();
@@ -93,18 +96,113 @@ const schema = z.object({
 type FormValues = z.input<typeof schema>;
 type ParsedValues = z.output<typeof schema>;
 
+/**
+ * `writeMovementTransaction` defaults to **true**, and that default is the
+ * whole point of the back-fill flow.
+ *
+ * The flow exists for money that landed on the exchange and was never entered
+ * into the app; money that is already sitting there as a transaction is the
+ * rare case. Defaulted the other way, a missed click issues the participant
+ * their share while writing nothing to the account, so the pool ends up holding
+ * more than the balance backs — silently, with no error and nothing on screen.
+ * That has already happened once in production (3,000 units against a 2,000
+ * balance, NAV 0.667). Leaving it OFF is now the deliberate act.
+ */
 const EMPTY_BACKFILL = {
   participantName: '',
   occurredOn: today(),
   cash: 0,
   poolValuePreMoney: 0,
-  writeMovementTransaction: false,
+  writeMovementTransaction: true,
 };
+
+/** One back-fill row as the consequence summary sees it: raw form state. */
+export interface BackfillRowSnapshot {
+  /** `useFieldArray`'s key — carried through so the summary can key its list. */
+  id: string;
+  participantName: string | undefined;
+  /** Straight off a number input, so a string far more often than a number. */
+  cash: unknown;
+  writeMovementTransaction: boolean | undefined;
+}
+
+/** A single arrival, resolved to a name and an amount. */
+export interface BackfillArrival {
+  id: string;
+  name: string;
+  cash: number;
+}
+
+/** What creating the pool will do to the account, in money terms. */
+export interface BackfillConsequence {
+  /** Rows that each write a deposit onto the account. */
+  written: BackfillArrival[];
+  /** Rows the user has declared are already on the account. */
+  assumed: BackfillArrival[];
+  writtenTotal: number;
+  /** Exactly how much more than the balance the pool would hold, if wrong. */
+  assumedTotal: number;
+  /** The exchange total typed for the start date — where the account starts. */
+  opening: number;
+  /** Where the account lands once the written arrivals are recorded. */
+  closing: number;
+}
+
+/** Number inputs hand back strings, blanks and the odd `undefined`. */
+function toAmount(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/**
+ * Projects the account balance the user is about to commit to.
+ *
+ * Safe to state as a plain fact because the domain refuses an arrival dated
+ * before inception (`PoolUnitEvent.Create`), and the inception mark sets the
+ * account to `poolValueAtInception` **as of that date**. So every written
+ * arrival lands strictly after the mark and simply adds on top of it.
+ *
+ * Only the ticked rows move the total. That is deliberate: un-ticking a row has
+ * to visibly change the number, or the summary is decoration rather than a
+ * check.
+ */
+export function projectBackfills(
+  rows: readonly BackfillRowSnapshot[],
+  poolValueAtInception: unknown,
+): BackfillConsequence {
+  const written: BackfillArrival[] = [];
+  const assumed: BackfillArrival[] = [];
+
+  for (const row of rows) {
+    const name = row.participantName?.trim();
+    const arrival: BackfillArrival = {
+      id: row.id,
+      name: name && name.length > 0 ? name : 'Unnamed arrival',
+      cash: toAmount(row.cash),
+    };
+    (row.writeMovementTransaction ? written : assumed).push(arrival);
+  }
+
+  const total = (arrivals: readonly BackfillArrival[]) =>
+    roundPoolMoney(arrivals.reduce((sum, a) => sum + a.cash, 0));
+
+  const writtenTotal = total(written);
+  const opening = toAmount(poolValueAtInception);
+
+  return {
+    written,
+    assumed,
+    writtenTotal,
+    assumedTotal: total(assumed),
+    opening,
+    closing: roundPoolMoney(opening + writtenTotal),
+  };
+}
 
 /**
  * Creates a pool over an existing account and seeds the owner.
  *
- * Two things this dialog refuses to guess:
+ * Three things this dialog refuses to guess:
  *
  * 1. **The exchange total on the start date is required**, even though the
  *    backend allows it to be null. Creating the pool turns the account's
@@ -117,6 +215,11 @@ const EMPTY_BACKFILL = {
  *    total**, one per arrival. The account's balance on that date already
  *    contains their cash — defaulting it would price the participant against
  *    their own money and hand them a slice of it for free.
+ *
+ * 3. **Whether each arrival still has to be recorded on the account.** Getting
+ *    this wrong is not a validation error — it is a pool that quietly holds
+ *    more than its balance backs — so the answer is defaulted to the common
+ *    case and the resulting balance is spelled out before the user can submit.
  */
 export function CreatePoolDialog() {
   const [open, setOpen] = useState(false);
@@ -153,6 +256,8 @@ export function CreatePoolDialog() {
 
   const accountId = watch('accountId');
   const inceptionDate = watch('inceptionDate');
+  const backfillValues = watch('backdatedSubscriptions');
+  const poolValueAtInception = watch('poolValueAtInception');
 
   // Only non-archived, re-priceable, not-already-pooled accounts qualify —
   // `pools.account_id` is unique, so offering a pooled account guarantees a
@@ -164,6 +269,26 @@ export function CreatePoolDialog() {
   // The pool never does FX: its currency IS the account's, so it is shown
   // rather than chosen.
   const currency = selected?.currency ?? '';
+  const accountLabel = selected?.name ?? 'the account';
+
+  // Before an account is picked there is no currency to name, and defaulting to
+  // one would put a confident "MDL" next to a figure that is not in MDL.
+  const money = (amount: number) =>
+    currency
+      ? formatMoney(amount, currency)
+      : amount.toLocaleString('ro-MD', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // `fields` carries the stable keys, `watch` carries the live values — the
+  // documented pairing for a field array whose values drive rendering. The
+  // toggle below is read out of form state rather than left to the DOM, so a
+  // row's answer cannot drift from what will be submitted.
+  const rows: BackfillRowSnapshot[] = fields.map((field, index) => ({
+    id: field.id,
+    participantName: backfillValues?.[index]?.participantName,
+    cash: backfillValues?.[index]?.cash,
+    writeMovementTransaction: backfillValues?.[index]?.writeMovementTransaction,
+  }));
+  const consequence = projectBackfills(rows, poolValueAtInception);
 
   const toggleBackfills = (next: boolean) => {
     setHasBackfills(next);
@@ -379,12 +504,27 @@ export function CreatePoolDialog() {
             </p>
 
             {hasBackfills &&
-              fields.map((field, index) => (
+              rows.map((row, index) => (
                 <div
-                  key={field.id}
-                  className="space-y-2 rounded-md border bg-muted/20 p-3"
+                  key={row.id}
+                  className="space-y-3 rounded-md border bg-muted/20 p-3"
                   data-testid="pool-backfill-row"
                 >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Arrival {index + 1}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => remove(index)}
+                      data-testid={`backfill-remove-${index}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Remove
+                    </Button>
+                  </div>
                   <div className="grid gap-2 sm:grid-cols-2">
                     <div className="space-y-1">
                       <Label htmlFor={`backfill-name-${index}`} className="text-xs">
@@ -460,25 +600,43 @@ export function CreatePoolDialog() {
                       )}
                     </div>
                   </div>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                      <input
-                        type="checkbox"
-                        data-testid={`backfill-write-tx-${index}`}
-                        {...register(`backdatedSubscriptions.${index}.writeMovementTransaction`)}
-                      />
-                      <span>The arrival was never recorded on the account — write it now</span>
-                    </label>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => remove(index)}
-                      data-testid={`backfill-remove-${index}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      Remove
-                    </Button>
+                  {/* Deliberately the heaviest thing in the row. It used to be
+                      a bare checkbox in muted 12px under four money fields, and
+                      a single missed click on it corrupted a real pool. */}
+                  <div
+                    className={cn(
+                      'flex items-start justify-between gap-3 rounded-md border p-3',
+                      row.writeMovementTransaction
+                        ? 'bg-muted/40'
+                        : 'border-amber-500/50 bg-amber-500/10',
+                    )}
+                  >
+                    <div className="space-y-1">
+                      <Label
+                        htmlFor={`backfill-write-tx-${index}`}
+                        className="text-sm font-semibold"
+                      >
+                        Write this arrival to {accountLabel}
+                      </Label>
+                      <p
+                        id={`backfill-write-tx-help-${index}`}
+                        className="text-xs text-muted-foreground"
+                        data-testid={`backfill-write-tx-help-${index}`}
+                      >
+                        {row.writeMovementTransaction
+                          ? `Records ${money(toAmount(row.cash))} onto ${accountLabel} on the arrival date. This is the usual case: the money reached the exchange but was never entered here.`
+                          : `Nothing will be recorded. The app takes it that ${money(toAmount(row.cash))} is already on ${accountLabel} as a transaction on the arrival date. Their share is issued either way.`}
+                      </p>
+                    </div>
+                    <Switch
+                      id={`backfill-write-tx-${index}`}
+                      data-testid={`backfill-write-tx-${index}`}
+                      checked={Boolean(row.writeMovementTransaction)}
+                      aria-describedby={`backfill-write-tx-help-${index}`}
+                      onCheckedChange={(next) =>
+                        setValue(`backdatedSubscriptions.${index}.writeMovementTransaction`, next)
+                      }
+                    />
                   </div>
                 </div>
               ))}
@@ -511,6 +669,49 @@ export function CreatePoolDialog() {
               </p>
             )}
           </div>
+
+          {/* The last thing read before Create, and the only place the two
+              numbers that must agree — units issued and money on the account —
+              are stated together. A user who sees the wrong closing total here
+              catches the mistake before it is written. */}
+          {hasBackfills && rows.length > 0 && (
+            <div
+              className="space-y-2 rounded-md border bg-muted/30 p-3"
+              data-testid="pool-consequence"
+            >
+              <p className="text-sm font-semibold">What this will do</p>
+              <p className="text-xs text-muted-foreground" data-testid="pool-consequence-written">
+                {consequence.written.length === 0
+                  ? `No arrival will be recorded on ${accountLabel}, so its total stays at ${money(consequence.opening)}.`
+                  : `This will record ${
+                      consequence.written.length === 1
+                        ? `1 arrival of ${money(consequence.writtenTotal)}`
+                        : `${consequence.written.length} arrivals totalling ${money(consequence.writtenTotal)}`
+                    } on ${accountLabel}, taking it from ${money(consequence.opening)} to ${money(consequence.closing)}.`}
+              </p>
+              {consequence.assumed.length > 0 && (
+                <div
+                  className="space-y-1 rounded-md border border-amber-500/50 bg-amber-500/10 p-2"
+                  data-testid="pool-consequence-assumed"
+                >
+                  <p className="text-xs font-medium">
+                    Not recorded — the app expects this money is already on {accountLabel}:
+                  </p>
+                  <ul className="space-y-0.5 text-xs text-muted-foreground">
+                    {consequence.assumed.map((arrival) => (
+                      <li key={arrival.id}>
+                        {arrival.name} — {money(arrival.cash)}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-xs text-muted-foreground">
+                    Their share is issued either way, so if it is not already there the pool will
+                    hold {money(consequence.assumedTotal)} more than the balance backs.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {apiError && (
             <p className="text-sm text-destructive" role="alert" data-testid="create-pool-error">

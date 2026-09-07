@@ -987,6 +987,12 @@ const poolDetails: Record<string, PoolDetailDto> = {
       unitsBalance: true,
       valueDrifts: [],
       unbackedCashClaims: [],
+      // The ledger predicts the ACCOUNT balance (2,600), not the pool value —
+      // the 100 of closed-but-unpaid payout cash has not left the account yet.
+      predictedBalance: 2600,
+      derivedBalance: 2600,
+      balanceDrift: 0,
+      balanceReconciles: true,
     },
   },
   'aaaa0001-0000-4000-8000-000000000002': {
@@ -1046,6 +1052,10 @@ const poolDetails: Record<string, PoolDetailDto> = {
       unitsBalance: true,
       valueDrifts: [],
       unbackedCashClaims: [],
+      predictedBalance: 0,
+      derivedBalance: 0,
+      balanceDrift: 0,
+      balanceReconciles: true,
     },
   },
 };

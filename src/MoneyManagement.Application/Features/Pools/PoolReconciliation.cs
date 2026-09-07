@@ -13,7 +13,7 @@ namespace MoneyManagement.Application.Features.Pools;
 /// third party's stake had been mispriced.
 /// </para>
 /// <para>
-/// Four checks, deliberately:
+/// Five checks, deliberately:
 /// </para>
 /// <list type="number">
 /// <item>
@@ -35,10 +35,18 @@ namespace MoneyManagement.Application.Features.Pools;
 /// </item>
 /// <item>
 /// <b>Unit events claiming cash the account never saw.</b> The mirror image of
-/// the first check, and the ONLY one that can catch a phantom backfill: the
-/// pre-money replay deliberately gives up on back-dated events, so a
-/// <c>CreatePool</c> backfill claiming money that never landed would otherwise
-/// pass every check while minting units against it.
+/// the first check: the pre-money replay deliberately gives up on back-dated
+/// events, so a <c>CreatePool</c> backfill claiming money that never landed
+/// would otherwise mint units against it and still pass the first three.
+/// </item>
+/// <item>
+/// <b>The ledger's predicted account balance vs. the real one.</b> The whole
+/// ledger folded into ONE number and compared with the account's derived
+/// balance. Where the four checks above each look for a particular shape of
+/// wrongness, this one asserts the arithmetic that has to hold no matter what
+/// shape the wrongness took — which is exactly why it survives the matching
+/// subtleties the fourth check depends on. See
+/// <see cref="CheckBalanceIdentity"/>.
 /// </item>
 /// </list>
 /// <para>
@@ -81,9 +89,13 @@ internal static class PoolReconciliation
         List<PoolUnitEvent> ordered =
             [.. events.OrderBy(e => e.OccurredOn).ThenBy(e => e.Id)];
 
+        // Measured ONCE and handed to both money checks, so the two can never
+        // disagree about how much of inception day belongs to the seed.
+        SeedTerritory seed = MeasureSeedTerritory(pool, ordered, accountRows, balanceAsOf);
+
         (IReadOnlyList<UnmatchedPoolTransactionDto> unmatched,
             IReadOnlyList<UnbackedPoolCashClaimDto> unbackedClaims) =
-            FindUnaccountedMoney(pool, ordered, accountRows);
+            FindUnaccountedMoney(pool, ordered, accountRows, seed);
 
         decimal participantUnits = 0m;
         foreach (PoolPosition position in snapshot.Positions)
@@ -97,18 +109,118 @@ internal static class PoolReconciliation
         IReadOnlyList<PoolValueDriftDto> valueDrifts =
             FindValueDrifts(ordered, accountRows, balanceAsOf, asOf);
 
+        BalanceIdentity balance = CheckBalanceIdentity(pool, ordered, accountRows, seed, balanceAsOf, asOf);
+
         return new PoolReconciliationDto(
             IsClean: unmatched.Count == 0
                 && unitsBalance
                 && valueDrifts.Count == 0
-                && unbackedClaims.Count == 0,
+                && unbackedClaims.Count == 0
+                && balance.Reconciles,
             unmatched,
             participantUnits,
             snapshot.TotalUnits,
             unitsDrift,
             unitsBalance,
             valueDrifts,
-            unbackedClaims);
+            unbackedClaims,
+            balance.Predicted,
+            balance.Derived,
+            balance.Drift,
+            balance.Reconciles);
+    }
+
+    /// <summary>
+    /// How much of INCEPTION DAY belongs to the seed, and how much of it does
+    /// not. Measured once per reconciliation and shared by both money checks, so
+    /// they cannot reach different conclusions about the same row.
+    /// <para>
+    /// The account held <c>balanceAsOf(inception)</c> that day. Three things can
+    /// claim a piece of it: unit events whose money row is already LINKED (their
+    /// own leg), the SEED (<c>units x nav</c>, and a seed is struck at a NAV of
+    /// exactly one, so that is simply the balance that became the owner's units),
+    /// and nothing else. What is left over — the SURPLUS — is money sitting on
+    /// the account at inception that the ledger does not yet account for.
+    /// </para>
+    /// <para>
+    /// <b>On a healthy pool the surplus is exactly zero</b>, because
+    /// <c>CreatePool</c> writes a catch-up mark that brings the account to the
+    /// very value it then seeds. It is positive only when money reached the
+    /// account on or before inception day AFTER the seed was struck — which
+    /// through the shipped write paths means a re-pricing mark on a pool whose
+    /// inception IS today, since every other route into a pooled account is
+    /// closed (<see cref="PooledAccountGuard"/>) and <c>AdjustBalance</c> refuses
+    /// a back-dated mark outright.
+    /// </para>
+    /// <para>
+    /// <b>Why it is a quantity and not an identity.</b> Both consumers need to
+    /// answer "does this event's money exist on the account at inception?", and
+    /// at inception two rows of the same amount and direction are genuinely
+    /// indistinguishable — that is exactly how a phantom subscription came to
+    /// consume the owner's own funding transfer. Counting is the only honest
+    /// answer available.
+    /// </para>
+    /// </summary>
+    /// <returns>
+    /// The linked backing and the surplus, both rounded to the cent, plus the
+    /// allowance an unlinked inception-day claim may draw on.
+    /// </returns>
+    private static SeedTerritory MeasureSeedTerritory(
+        Pool pool,
+        IReadOnlyList<PoolUnitEvent> ordered,
+        IReadOnlyList<PoolAccountRow> accountRows,
+        Func<DateOnly, decimal> balanceAsOf)
+    {
+        var linkedTransactionIds = new HashSet<Guid>();
+
+        decimal seedValue = 0m;
+        decimal unlinkedInflow = 0m;
+
+        foreach (PoolUnitEvent unitEvent in ordered)
+        {
+            if (unitEvent.Kind == PoolUnitEventKind.Seed)
+            {
+                seedValue += PoolUnitRegister.RoundMoney(unitEvent.Units * unitEvent.NavPerUnit);
+                continue;
+            }
+
+            if (unitEvent.MovementTransactionId is Guid transactionId)
+            {
+                linkedTransactionIds.Add(transactionId);
+                continue;
+            }
+
+            // Cash an unlinked event says ARRIVED on or before inception day. The
+            // ceiling on what such claims may collectively take off the seed.
+            if (unitEvent.Cash is { } cash
+                && unitEvent.SettledOn is DateOnly settledOn
+                && settledOn <= pool.InceptionDate
+                && DirectionOf(unitEvent.Kind) == TransactionDirection.Income)
+            {
+                unlinkedInflow += cash.Amount;
+            }
+        }
+
+        decimal linkedBacking = 0m;
+
+        foreach (PoolAccountRow row in accountRows)
+        {
+            if (row.Date <= pool.InceptionDate && linkedTransactionIds.Contains(row.Id))
+            {
+                linkedBacking += Signed(row);
+            }
+        }
+
+        decimal balanceAtInception = balanceAsOf(pool.InceptionDate);
+
+        decimal surplus = PoolUnitRegister.RoundMoney(
+            balanceAtInception - linkedBacking - seedValue);
+
+        return new SeedTerritory(
+            balanceAtInception,
+            PoolUnitRegister.RoundMoney(linkedBacking),
+            surplus,
+            ClaimAllowance: Math.Clamp(unlinkedInflow, 0m, Math.Max(0m, surplus)));
     }
 
     /// <summary>
@@ -137,11 +249,41 @@ internal static class PoolReconciliation
     /// <para>
     /// <b>Rows dated on or before INCEPTION are already priced into the seed</b>
     /// — the owner's existing balance simply became units, so nothing on or
-    /// before that day needs a ledger entry of its own. They are skipped, but
-    /// only AFTER being offered to the claim list: a pool bootstrapped from
-    /// history can legitimately have a backfilled subscription landing on the
-    /// inception date itself, and consuming its claim here is what stops the
-    /// same event being reported as a phantom below.
+    /// before that day needs a ledger entry of its own. They are never REPORTED
+    /// as unaccounted. They are, however, still offered to the claim list first,
+    /// because a pool bootstrapped from history can have a backfilled
+    /// subscription landing on the inception date itself, and consuming its own
+    /// row is what stops that event being reported as a phantom below.
+    /// </para>
+    /// <para>
+    /// <b>THE SEED'S BACKING IS RESERVED BEFORE ANY CLAIM MAY TOUCH IT.</b> The
+    /// old ordering — claim match first, seed skip second, no reservation at all
+    /// — is what let a real pool report itself clean while a friend's 1,000 had
+    /// never been recorded: the phantom claim (inception day, Income, 1,000)
+    /// matched the OWNER'S OWN funding transfer, a different real row, consumed
+    /// it, and left nothing to report. Date + direction + amount cannot tell
+    /// those two rows apart, and no tie-breaking rule can, because they really
+    /// are identical.
+    /// </para>
+    /// <para>
+    /// The distinction that CAN be made is one of quantity rather than identity.
+    /// The account held <c>balanceAsOf(inception)</c> on inception day; the seed
+    /// claims <c>units x nav</c> of it (a seed is struck at a NAV of exactly one,
+    /// so that is just the balance that became the owner's units), and every unit
+    /// event whose money row is already LINKED claims its own. Whatever is left
+    /// over is the only money at inception an unlinked claim could be pointing
+    /// at, and a claim is matched against a row dated then only while that
+    /// surplus can still cover it. On a healthy pool the surplus is exactly zero,
+    /// because <c>CreatePool</c> marks the account to the very value it seeds; on
+    /// the broken pool it was zero as well, and the phantom got reported.
+    /// </para>
+    /// <para>
+    /// Deliberately a BUDGET and not a ban. A ban would also refuse the
+    /// legitimate from-history case the ordering exists for, trading one silent
+    /// miss for a permanent false alarm. The surplus is measured up front by
+    /// <see cref="MeasureSeedTerritory"/>, never as this walk proceeds, so it
+    /// cannot depend on whether the owner's row happens to sort before or after a
+    /// friend's leg — which in the live pool it did.
     /// </para>
     /// <para>
     /// <b>Claims nothing matched are the fourth finding.</b> A settled unit event
@@ -156,7 +298,8 @@ internal static class PoolReconciliation
         IReadOnlyList<UnbackedPoolCashClaimDto> UnbackedClaims) FindUnaccountedMoney(
         Pool pool,
         IReadOnlyList<PoolUnitEvent> ordered,
-        IReadOnlyList<PoolAccountRow> accountRows)
+        IReadOnlyList<PoolAccountRow> accountRows,
+        SeedTerritory seed)
     {
         var linkedTransactionIds = new HashSet<Guid>();
         var unlinkedCashClaims = new List<CashClaim>();
@@ -178,8 +321,13 @@ internal static class PoolReconciliation
                 new CashClaim(unitEvent.Id, settledOn, DirectionOf(unitEvent.Kind), cash.Amount));
         }
 
+        // The seed's backing was reserved before this walk started; what is left
+        // is the running budget an inception-day claim may draw on.
+        decimal inceptionSurplus = seed.Surplus;
+
         var unmatched = new List<UnmatchedPoolTransactionDto>();
 
+        // Rows in the order they were written.
         foreach (PoolAccountRow row in accountRows.OrderBy(r => r.Date).ThenBy(r => r.Id))
         {
             if (row.IsAdjustment || linkedTransactionIds.Contains(row.Id))
@@ -187,26 +335,39 @@ internal static class PoolReconciliation
                 continue;
             }
 
-            int claimIndex = unlinkedCashClaims.FindIndex(c =>
-                c.Date == row.Date
-                && c.Direction == row.Direction
-                && Math.Abs(c.Amount - row.Amount) <= MoneyTolerance);
+            bool insideTheSeedsTerritory = row.Date <= pool.InceptionDate;
+
+            // Inside the seed's territory a claim may only consume money the seed
+            // does not already account for. After inception there is nothing to
+            // reserve and the match is unrestricted.
+            bool claimable = !insideTheSeedsTerritory
+                || inceptionSurplus + MoneyTolerance >= row.Amount;
+
+            int claimIndex = claimable
+                ? unlinkedCashClaims.FindIndex(c =>
+                    c.Date == row.Date
+                    && c.Direction == row.Direction
+                    && Math.Abs(c.Amount - row.Amount) <= MoneyTolerance)
+                : -1;
 
             if (claimIndex >= 0)
             {
                 // One claim, one row. Removing it stops two identical
                 // subscriptions from being explained by a single unit event.
                 unlinkedCashClaims.RemoveAt(claimIndex);
+
+                if (insideTheSeedsTerritory)
+                {
+                    inceptionSurplus -= row.Amount;
+                }
+
                 continue;
             }
 
             // Inception day and earlier is the seed's territory: the balance
             // standing there BECAME the owner's units, so no row up to and
-            // including that date needs an event of its own. Checked after the
-            // claim match, never before, so a backfilled inception-day
-            // subscription consumes its claim instead of being reported as a
-            // phantom.
-            if (row.Date <= pool.InceptionDate)
+            // including that date needs an event of its own.
+            if (insideTheSeedsTerritory)
             {
                 continue;
             }
@@ -292,6 +453,144 @@ internal static class PoolReconciliation
         return drifts;
     }
 
+    /// <summary>
+    /// Folds the WHOLE ledger into one number and compares it with the account's
+    /// derived balance.
+    /// <para>
+    /// The ledger makes a falsifiable claim about the account, and this is it:
+    /// start from the balance that became the seed's units on inception day, add
+    /// every subscription's cash, take out every redemption's and every SETTLED
+    /// distribution's, and move it by every re-pricing mark since. That total has
+    /// to be what the account actually holds.
+    /// </para>
+    /// <para>
+    /// <b>Why this exists next to four checks that already look for wrongness:</b>
+    /// each of those looks for a SHAPE — an unexplained row, a units mismatch, a
+    /// pre-money that no longer re-derives, a claim with no row — and a shape can
+    /// be mimicked. A real pool reported itself clean with 3,000 units against a
+    /// 2,000 balance because one friend's phantom claim carried the same date,
+    /// direction and amount as the owner's own funding transfer and quietly
+    /// consumed it. This check does not care which row is which: it predicts
+    /// 3,000, the account holds 2,000, and the 1,000 gap IS the missing leg.
+    /// </para>
+    /// <para>
+    /// <b>The inception anchor is derived from the ACCOUNT, not read off the seed
+    /// event</b> — and that is the difference between a tripwire and a nuisance.
+    /// The two agree on a healthy pool (<c>CreatePool</c> marks the account to the
+    /// exact value it seeds), but they part company the moment a mark lands ON
+    /// inception day AFTER the seed was struck — create a pool dated today and
+    /// record a subscription the same day and <c>PoolMark</c> writes exactly that,
+    /// through the shipped write slice with no guard bypassed. Anchored on the
+    /// seed's stored value, every such pool would report a gap equal to the mark,
+    /// forever. Anchored on <c>balanceAsOf(inception)</c> the mark is simply
+    /// inside the anchor and the identity still holds.
+    /// </para>
+    /// <para>
+    /// Four things it must NOT fire on, and why it does not:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>
+    /// <b>An unpaid distribution.</b> Closed but not settled: the cash is still
+    /// sitting in the account. <c>SettledOn</c> is null, so the payout is not
+    /// subtracted — the same two-phase rule <c>SnapshotAsOf</c> lives by.
+    /// </item>
+    /// <item>
+    /// <b>Rows predating inception.</b> Whatever history the account carried when
+    /// the pool started is inside <c>balanceAsOf(inception)</c>, which is where
+    /// the prediction starts. It is never enumerated, so it can never be
+    /// double-counted, and an account with years of rows behind it reconciles the
+    /// same as an empty one.
+    /// </item>
+    /// <item>
+    /// <b>The marks convention.</b> Marks move the balance and everybody's stake
+    /// pro-rata and deliberately carry no unit event, so they are read off the
+    /// ACCOUNT rather than looked for in the ledger. Only marks dated after
+    /// inception are added; the ones on or before it are already in the anchor.
+    /// </item>
+    /// <item>
+    /// <b>Money rows dated at inception that a unit event owns.</b> A backfill
+    /// whose leg lands on inception day is inside the anchor AND inside the cash
+    /// sum below, so <see cref="SeedTerritory.LinkedBacking"/> takes it back out
+    /// exactly once. Its unlinked twin — a from-history backfill whose arrival was
+    /// already typed onto the account — is handled by
+    /// <see cref="SeedTerritory.ClaimAllowance"/>, which is capped at the surplus
+    /// actually sitting there.
+    /// </item>
+    /// </list>
+    /// <para>
+    /// <b>It reads quantities off <see cref="SeedTerritory"/>, never the money
+    /// check's verdict.</b> Both come from the same measurement, so on a pool
+    /// where the money check is right the two agree; but the allowance is a
+    /// ceiling derived from the account's own balance, not "the rows a matcher
+    /// decided to accept". Break the matcher entirely and this still predicts
+    /// 3,000 against the live pool's 2,000 — which is what "regardless of matching
+    /// subtleties" has to mean to be worth adding.
+    /// </para>
+    /// <para>
+    /// <b>What it does NOT assert:</b> that the seed's stored units match the
+    /// account. They match by construction — the catch-up mark makes them — and
+    /// the only things that can break the equality later (a mark deleted,
+    /// pre-inception history edited) are exactly what
+    /// <see cref="PoolReconciliationDto.ValueDrifts"/> exists to report. Asserting
+    /// it here would restate that finding in a second, vaguer voice.
+    /// </para>
+    /// </summary>
+    /// <param name="seed">
+    /// Inception day, measured. Only the ARITHMETIC is taken from it — the linked
+    /// backing and the claim allowance — never a decision about which row a claim
+    /// was matched to. That independence is the point: this check must survive
+    /// the money check being wrong.
+    /// </param>
+    private static BalanceIdentity CheckBalanceIdentity(
+        Pool pool,
+        IReadOnlyList<PoolUnitEvent> ordered,
+        IReadOnlyList<PoolAccountRow> accountRows,
+        SeedTerritory seed,
+        Func<DateOnly, decimal> balanceAsOf,
+        DateOnly asOf)
+    {
+        // The balance that became the owner's units: the account as it stood on
+        // inception day, less the legs the ledger already owns and the most an
+        // unlinked inception-day claim could legitimately be pointing at.
+        decimal predicted = seed.BalanceAtInception - seed.LinkedBacking - seed.ClaimAllowance;
+
+        foreach (PoolAccountRow row in accountRows)
+        {
+            if (row.IsAdjustment && row.Date > pool.InceptionDate && row.Date <= asOf)
+            {
+                predicted += Signed(row);
+            }
+        }
+
+        foreach (PoolUnitEvent unitEvent in ordered)
+        {
+            // Cash that has actually MOVED. Seeds and the two cost kinds carry
+            // none; a closed-but-unpaid distribution has no settlement date, and
+            // its money is still sitting in the account.
+            if (unitEvent.Cash is not { } cash
+                || unitEvent.SettledOn is not DateOnly settledOn
+                || settledOn > asOf)
+            {
+                continue;
+            }
+
+            predicted += DirectionOf(unitEvent.Kind) == TransactionDirection.Income
+                ? cash.Amount
+                : -cash.Amount;
+        }
+
+        predicted = PoolUnitRegister.RoundMoney(predicted);
+        decimal derived = PoolUnitRegister.RoundMoney(balanceAsOf(asOf));
+
+        decimal drift = predicted - derived;
+
+        return new BalanceIdentity(predicted, derived, drift, Math.Abs(drift) <= MoneyTolerance);
+    }
+
+    /// <summary>The row's effect on the account's balance, signed.</summary>
+    private static decimal Signed(PoolAccountRow row) =>
+        row.Direction == TransactionDirection.Income ? row.Amount : -row.Amount;
+
     /// <summary>The direction the synthesized money row carries. Mirrors <see cref="PoolMovements"/>.</summary>
     private static TransactionDirection DirectionOf(PoolUnitEventKind kind) =>
         kind == PoolUnitEventKind.Subscription
@@ -304,6 +603,38 @@ internal static class PoolReconciliation
         DateOnly Date,
         TransactionDirection Direction,
         decimal Amount);
+
+    /// <summary>Inception day, measured. See <see cref="MeasureSeedTerritory"/>.</summary>
+    /// <param name="BalanceAtInception">What the account held on inception day.</param>
+    /// <param name="LinkedBacking">
+    /// Signed total of the rows dated on or before inception that a unit event
+    /// already points at. That money is the event's, not the seed's.
+    /// </param>
+    /// <param name="Surplus">
+    /// <c>BalanceAtInception − LinkedBacking − seedValue</c>: money on the account
+    /// at inception the ledger does not yet account for. Zero on a healthy pool.
+    /// </param>
+    /// <param name="ClaimAllowance">
+    /// The most that unlinked events claiming an inception-day ARRIVAL can
+    /// collectively take off the seed — their total cash, capped at the surplus
+    /// actually sitting there. Zero when there is nothing spare, which is what
+    /// stopped a phantom subscription consuming the owner's funding transfer.
+    /// </param>
+    private readonly record struct SeedTerritory(
+        decimal BalanceAtInception,
+        decimal LinkedBacking,
+        decimal Surplus,
+        decimal ClaimAllowance);
+
+    /// <param name="Predicted">What the ledger says the account should hold.</param>
+    /// <param name="Derived">What the account's own rows say it holds.</param>
+    /// <param name="Drift"><c>Predicted − Derived</c>.</param>
+    /// <param name="Reconciles">Whether the two agree to within half a cent.</param>
+    private readonly record struct BalanceIdentity(
+        decimal Predicted,
+        decimal Derived,
+        decimal Drift,
+        bool Reconciles);
 }
 
 /// <summary>

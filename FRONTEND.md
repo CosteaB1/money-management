@@ -684,10 +684,24 @@ money**, so several conventions exist only here.
   arrangement, so the UI explains it rather than printing a bare number. The **owner's** distributable
   is rendered as "Stays in the pool" rather than an amount, because the owner's seed carries no cash
   basis and the raw figure would read as an offer.
-- **The reconciliation panel renders only when something is wrong**, across all four finding classes
-  (unaccounted transactions, unit drift, value drifts, unbacked cash claims). A permanently-green
-  panel is noise, and noise gets ignored. The trade-off is that a clean pool gives no positive
-  confirmation the tripwire ran.
+- **The reconciliation panel renders only when something is wrong**, across all **five** finding
+  classes (unmatched transactions, unit drift, value drifts, unbacked cash claims, and the balance
+  identity). A permanently-green panel is noise, and noise gets ignored. The trade-off is that a clean
+  pool gives no positive confirmation the tripwire ran.
+- **The balance finding leads, and reads in two directions.** Added 2026-09-07 after a live pool reached
+  3,000 units against a 2,000 balance and the panel said nothing. *Ledger claims more* means shares were
+  issued for money that never arrived; *account holds more* means cash is being split pro-rata as though
+  the pool earned it. They are different problems and are worded differently — the gap is shown
+  **unsigned** with the direction carried by the title, the label and `data-direction`, because a bare
+  negative next to two positive balances is what gets read backwards on the day it matters.
+- **Its remedy deliberately does not say "record money in".** `RecordSubscription` always writes its own
+  movement leg, so using it to repair a missing arrival would mint a *second* set of shares. The fix is a
+  transaction on the account, dated the day the money actually arrived — the date matters, because the
+  unbacked-claim matcher pairs on exact date, direction and amount, so a wrong date clears the balance
+  check while leaving the claim standing.
+- **One cause can raise two findings**, so the panel relates them arithmetically rather than presenting
+  them as unrelated failures: an unbacked claim moves *predicted*, an unmatched row moves *derived*, and
+  when what they jointly explain ties to the drift the panel says so outright.
 - **Mark staleness** warns amber past 7 days and red past 30 (`MARK_STALE_DAYS` / `MARK_CRITICAL_DAYS`,
   exported constants). The banner is a nudge, not the safety mechanism — the actual protection is that
   every capital event hard-blocks on a freshly typed total.

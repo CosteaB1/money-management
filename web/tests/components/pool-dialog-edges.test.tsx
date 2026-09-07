@@ -103,6 +103,10 @@ function pool(overrides: Partial<PoolDetailDto> = {}): PoolDetailDto {
       unitsBalance: true,
       valueDrifts: [],
       unbackedCashClaims: [],
+      predictedBalance: 2600,
+      derivedBalance: 2600,
+      balanceDrift: 0,
+      balanceReconciles: true,
     },
     ...overrides,
   };

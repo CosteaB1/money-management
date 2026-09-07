@@ -571,6 +571,14 @@ public sealed class PoolEndpointTests(CustomWebApplicationFactory factory) : IAs
         reconciliation.GetProperty("unbackedCashClaims").GetArrayLength().Should().Be(0);
         reconciliation.GetProperty("unitsBalance").GetBoolean().Should().BeTrue();
         reconciliation.GetProperty("unitsDrift").GetDecimal().Should().Be(0m);
+
+        // The ledger's own arithmetic, over the wire: 1,200 seeded, Andrei's 800
+        // replayed with its money row, the close's +200 mark — and the 80 payout
+        // still owed, so it has NOT left the account and is not subtracted.
+        reconciliation.GetProperty("balanceReconciles").GetBoolean().Should().BeTrue();
+        reconciliation.GetProperty("predictedBalance").GetDecimal().Should().Be(2_200m);
+        reconciliation.GetProperty("derivedBalance").GetDecimal().Should().Be(2_200m);
+        reconciliation.GetProperty("balanceDrift").GetDecimal().Should().Be(0m);
     }
 
     /// <summary>The inception date the from-history fixture uses; the account opens the same day.</summary>

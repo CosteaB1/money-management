@@ -186,7 +186,7 @@ public sealed record PoolUnitEventDto(
 /// were priced, and the right answer depends on which of the two records is
 /// wrong.
 /// </summary>
-/// <param name="IsClean">True when all four checks pass. The only field a badge needs.</param>
+/// <param name="IsClean">True when all five checks pass. The only field a badge needs.</param>
 /// <param name="UnmatchedTransactions">
 /// Money that moved on the pool account without a unit event to account for it.
 /// <b>Each one is silently shared pro-rata with the outside investors</b>, which
@@ -211,10 +211,35 @@ public sealed record PoolUnitEventDto(
 /// moved on a date the account has no row for. <b>Units were minted or burned
 /// against money that never landed</b>, which mis-prices every participant.
 /// <para>
-/// This is the only check that can catch a phantom backfill. The pre-money
-/// replay skips back-dated events on purpose — a market move between inception
-/// and a friend's arrival has no row anywhere — so a <c>CreatePool</c> backfill
-/// claiming an arrival that never happened clears every other check.
+/// The pre-money replay skips back-dated events on purpose — a market move
+/// between inception and a friend's arrival has no row anywhere — so a
+/// <c>CreatePool</c> backfill claiming an arrival that never happened clears the
+/// first three checks entirely, and only this one and
+/// <see cref="BalanceReconciles"/> can see it.
+/// </para>
+/// </param>
+/// <param name="PredictedBalance">
+/// What the ledger says the pool's account should hold today: the balance that
+/// became the seed's units, plus every subscription's cash, minus every
+/// redemption's and every SETTLED distribution's, moved by every re-pricing mark
+/// since inception. A closed-but-unpaid payout is deliberately still in here —
+/// its cash has not left the account yet.
+/// </param>
+/// <param name="DerivedBalance">What the account's own rows say it holds today.</param>
+/// <param name="BalanceDrift">
+/// <c>PredictedBalance − DerivedBalance</c>. Positive means the ledger has issued
+/// units against money the account never received; negative means money reached
+/// the account that no unit event accounts for.
+/// </param>
+/// <param name="BalanceReconciles">
+/// Whether the two agree to within half a cent.
+/// <para>
+/// <b>The check that survives the matching subtleties the others depend on.</b>
+/// Every other finding recognises a particular SHAPE of wrongness, and a shape
+/// can be mimicked: a real pool reported itself clean with 3,000 units against a
+/// 2,000 balance because a phantom subscription's claim was indistinguishable
+/// from the owner's own funding transfer and consumed it. This one is pure
+/// arithmetic on the whole ledger, so it names the missing 1,000 regardless.
 /// </para>
 /// </param>
 public sealed record PoolReconciliationDto(
@@ -225,7 +250,11 @@ public sealed record PoolReconciliationDto(
     decimal UnitsDrift,
     bool UnitsBalance,
     IReadOnlyList<PoolValueDriftDto> ValueDrifts,
-    IReadOnlyList<UnbackedPoolCashClaimDto> UnbackedCashClaims);
+    IReadOnlyList<UnbackedPoolCashClaimDto> UnbackedCashClaims,
+    decimal PredictedBalance,
+    decimal DerivedBalance,
+    decimal BalanceDrift,
+    bool BalanceReconciles);
 
 /// <summary>A transaction on the pool account with no unit event behind it.</summary>
 public sealed record UnmatchedPoolTransactionDto(

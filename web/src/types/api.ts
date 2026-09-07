@@ -1375,7 +1375,7 @@ export interface UnbackedPoolCashClaimDto {
  * priced, and the right answer depends on which of the two records is wrong.
  */
 export interface PoolReconciliationDto {
-  /** True when all four checks pass. The only field a badge needs. */
+  /** True when all five checks pass. The only field a badge needs. */
   isClean: boolean;
   /** Money that moved on the pool account with no unit event to account for it. */
   unmatchedTransactions: UnmatchedPoolTransactionDto[];
@@ -1389,6 +1389,32 @@ export interface PoolReconciliationDto {
   unitsBalance: boolean;
   valueDrifts: PoolValueDriftDto[];
   unbackedCashClaims: UnbackedPoolCashClaimDto[];
+  /**
+   * What the ledger says the pool's account should be holding today: the
+   * balance that became the opening stake's units, plus every arrival's cash,
+   * minus every withdrawal's and every SETTLED payout's, moved by every
+   * re-pricing since inception. A closed-but-unpaid payout is deliberately
+   * still in here — its cash has not left the account yet.
+   */
+  predictedBalance: number;
+  /** What the account's own rows say it holds today. */
+  derivedBalance: number;
+  /**
+   * `predictedBalance - derivedBalance`. Positive means the ledger has issued
+   * shares against money the account never received; negative means money
+   * reached the account that no ledger entry accounts for.
+   */
+  balanceDrift: number;
+  /**
+   * Whether the two agree to within half a cent.
+   *
+   * The check that survives the matching subtleties the other four depend on:
+   * a real pool reported itself clean with 3,000 units against a 2,000 balance
+   * because a phantom claim was indistinguishable from the owner's own funding
+   * transfer and consumed it. This one is arithmetic over the whole ledger, so
+   * it names the missing 1,000 regardless of what matched what.
+   */
+  balanceReconciles: boolean;
 }
 
 /**

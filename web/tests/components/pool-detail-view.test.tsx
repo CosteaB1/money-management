@@ -252,7 +252,7 @@ describe('PoolDetailView — reconciliation tripwire', () => {
     expect(screen.queryByTestId('pool-reconciliation-panel')).not.toBeInTheDocument();
   });
 
-  it('surfaces all four finding classes and promises no repair', async () => {
+  it('surfaces every finding class and promises no repair', async () => {
     const detail = await seededDetail();
     serveDetail({
       ...detail,
@@ -291,6 +291,12 @@ describe('PoolDetailView — reconciliation tripwire', () => {
             amount: 120,
           },
         ],
+        // Deliberately NOT the sum of the two cash findings (-120 + 300 = 180),
+        // so the cross-reference has to take its cautious branch.
+        predictedBalance: 2300,
+        derivedBalance: 2100,
+        balanceDrift: 200,
+        balanceReconciles: false,
       },
     });
 
@@ -307,6 +313,13 @@ describe('PoolDetailView — reconciliation tripwire', () => {
       'Money in',
     );
     expect(within(panel).getByTestId('reconciliation-unbacked-row')).toHaveTextContent('Money out');
+    expect(within(panel).getByTestId('reconciliation-balance-drift').textContent).toBe(
+      formatMoney(200, 'USD'),
+    );
+    // The gap and the cash findings don't tie out, so it points rather than promises.
+    expect(within(panel).getByTestId('reconciliation-balance-related')).toHaveTextContent(
+      /Read this together with the other findings listed below/i,
+    );
     // It reports; it never corrects. The copy has to say so.
     expect(panel).toHaveTextContent(/this is a report/i);
     expect(panel).toHaveTextContent(/Nothing below has been changed or repaired/i);
@@ -325,6 +338,10 @@ describe('PoolDetailView — reconciliation tripwire', () => {
         unitsBalance: false,
         valueDrifts: [],
         unbackedCashClaims: [],
+        predictedBalance: 2600,
+        derivedBalance: 2600,
+        balanceDrift: 0,
+        balanceReconciles: true,
       },
     });
     renderWithClient(<PoolDetailView id={POOL_ID} />);
@@ -333,6 +350,177 @@ describe('PoolDetailView — reconciliation tripwire', () => {
     expect(screen.queryByTestId('reconciliation-unmatched')).not.toBeInTheDocument();
     expect(screen.queryByTestId('reconciliation-value-drift')).not.toBeInTheDocument();
     expect(screen.queryByTestId('reconciliation-unbacked')).not.toBeInTheDocument();
+    // The panel is open on another finding, and the balances agree. Saying
+    // anything about them here would be inventing a second problem.
+    expect(screen.queryByTestId('reconciliation-balance')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The fifth check: what the ledger says the account should be holding, against
+ * what it holds. This is the one that would have caught the live incident, so
+ * the tests are written around the shape that got past the other four.
+ */
+describe('PoolDetailView — the balance the ledger predicts', () => {
+  type Reconciliation = PoolDetailDto['reconciliation'];
+
+  /** Every other check passing, so each assertion is about this finding alone. */
+  function balanceFinding(over: Partial<Reconciliation>): Reconciliation {
+    return {
+      isClean: false,
+      unmatchedTransactions: [],
+      participantUnits: 3000,
+      ledgerUnits: 3000,
+      unitsDrift: 0,
+      unitsBalance: true,
+      valueDrifts: [],
+      unbackedCashClaims: [],
+      predictedBalance: 0,
+      derivedBalance: 0,
+      balanceDrift: 0,
+      balanceReconciles: false,
+      ...over,
+    };
+  }
+
+  /** The phantom arrival from the live incident: 1,000 in, no transaction. */
+  const PHANTOM_ARRIVAL = {
+    eventId: 'cccc0001-0000-4000-8000-000000000009',
+    settledOn: '2026-06-01',
+    direction: 'Income',
+    amount: 1000,
+  } as const;
+
+  async function serveBalance(over: Partial<Reconciliation>) {
+    const detail = await seededDetail();
+    serveDetail({ ...detail, reconciliation: balanceFinding(over) });
+    renderWithClient(<PoolDetailView id={POOL_ID} />);
+    return screen.findByTestId('reconciliation-balance');
+  }
+
+  it('names the live incident in the numbers the user is looking at', async () => {
+    const finding = await serveBalance({
+      predictedBalance: 3000,
+      derivedBalance: 2000,
+      balanceDrift: 1000,
+      unbackedCashClaims: [PHANTOM_ARRIVAL],
+    });
+
+    expect(finding).toHaveAttribute('data-direction', 'ledger-claims-more');
+    expect(finding).toHaveTextContent('This pool has issued shares for money that never arrived');
+
+    expect(within(finding).getByTestId('reconciliation-balance-predicted').textContent).toBe(
+      formatMoney(3000, 'USD'),
+    );
+    expect(within(finding).getByTestId('reconciliation-balance-derived').textContent).toBe(
+      formatMoney(2000, 'USD'),
+    );
+    expect(within(finding).getByTestId('reconciliation-balance-drift').textContent).toBe(
+      formatMoney(1000, 'USD'),
+    );
+    // Pinned as the user reads it, not as the API sends it: app-wide ro-MD
+    // grouping with the ISO code, and no bare minus sign in front of the gap.
+    expect(within(finding).getByTestId('reconciliation-balance-drift')).toHaveTextContent(
+      '1.000,00 USD',
+    );
+
+    // What it means and what to do about it, not just that it happened.
+    expect(finding).toHaveTextContent(/should be holding/i);
+    expect(finding).toHaveTextContent(/an arrival recorded while the pool was being set up/i);
+    expect(finding).toHaveTextContent(/add it, dated the day the money actually arrived/i);
+  });
+
+  it('relates the gap to the entry behind it rather than reporting two problems', async () => {
+    const finding = await serveBalance({
+      predictedBalance: 3000,
+      derivedBalance: 2000,
+      balanceDrift: 1000,
+      unbackedCashClaims: [PHANTOM_ARRIVAL],
+    });
+
+    const note = within(finding).getByTestId('reconciliation-balance-related');
+    expect(note).toHaveTextContent(/One problem, not two/i);
+    expect(note).toHaveTextContent(/claim money the account never saw/i);
+    expect(note).toHaveTextContent(/this gap is accounted for exactly by/i);
+  });
+
+  it('reads the other way round when the account holds the unexplained money', async () => {
+    const finding = await serveBalance({
+      predictedBalance: 1800,
+      derivedBalance: 2000,
+      balanceDrift: -200,
+      unmatchedTransactions: [
+        {
+          transactionId: 'tx-9',
+          transactionDate: '2026-08-30',
+          description: 'Manual deposit',
+          direction: 'Income',
+          amount: 200,
+          currency: 'USD',
+          isTransfer: false,
+        },
+      ],
+    });
+
+    expect(finding).toHaveAttribute('data-direction', 'account-holds-more');
+    expect(finding).toHaveTextContent("The account holds money this pool can't account for");
+    // The opposite reading must not leak into this one.
+    expect(finding).not.toHaveTextContent(/issued shares for money that never arrived/i);
+    expect(finding).not.toHaveTextContent(/not owed to anyone/i);
+
+    expect(within(finding).getByTestId('reconciliation-balance-predicted').textContent).toBe(
+      formatMoney(1800, 'USD'),
+    );
+    expect(within(finding).getByTestId('reconciliation-balance-derived').textContent).toBe(
+      formatMoney(2000, 'USD'),
+    );
+    // Unsigned, with the direction carried by the label instead.
+    expect(within(finding).getByTestId('reconciliation-balance-drift').textContent).toBe(
+      formatMoney(200, 'USD'),
+    );
+    expect(finding).toHaveTextContent(/Unaccounted for on the account/i);
+
+    expect(finding).toHaveTextContent(/split pro-rata across everyone in the pool/i);
+    expect(finding).toHaveTextContent(/count the same cash twice/i);
+
+    const note = within(finding).getByTestId('reconciliation-balance-related');
+    expect(note).toHaveTextContent(/One problem, not two/i);
+    expect(note).toHaveTextContent(/no ledger entry behind them/i);
+  });
+
+  it('will not claim the gap is explained when it cannot do the arithmetic', async () => {
+    const finding = await serveBalance({
+      predictedBalance: 1800,
+      derivedBalance: 2000,
+      balanceDrift: -200,
+      // The same 200, denominated in something else. The totals would tie if we
+      // summed them blindly, which is exactly why we don't.
+      unmatchedTransactions: [
+        {
+          transactionId: 'tx-9',
+          transactionDate: '2026-08-30',
+          description: 'Manual deposit',
+          direction: 'Income',
+          amount: 200,
+          currency: 'EUR',
+          isTransfer: false,
+        },
+      ],
+    });
+
+    const note = within(finding).getByTestId('reconciliation-balance-related');
+    expect(note).toHaveTextContent(/Read this together with/i);
+    expect(note).not.toHaveTextContent(/exactly/i);
+  });
+
+  it('says nothing about other findings when there are none to relate it to', async () => {
+    const finding = await serveBalance({
+      predictedBalance: 3000,
+      derivedBalance: 2000,
+      balanceDrift: 1000,
+    });
+
+    expect(within(finding).queryByTestId('reconciliation-balance-related')).not.toBeInTheDocument();
   });
 });
 
