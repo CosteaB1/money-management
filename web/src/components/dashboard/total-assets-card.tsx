@@ -42,7 +42,7 @@ export function TotalAssetsCard() {
       title="Total assets"
       icon={Landmark}
       amountMdl={data?.grossAssetsMdl ?? 0}
-      caption="Sum of all non-archived account balances in MDL, before what you owe."
+      caption="Your share of every non-archived account balance in MDL, before what you owe."
       isLoading={isLoading || !data}
       isError={isError}
       testId="total-assets"

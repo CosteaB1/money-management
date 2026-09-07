@@ -570,7 +570,12 @@ export interface NetWorthTrendPointDto {
  * `loansMissingFxRate`, so the UI can flag *which* total is incomplete.
  */
 export interface NetWorthDto {
-  /** Sum of non-archived account balances, in MDL. */
+  /**
+   * The user's SHARE of every non-archived account balance, in MDL. For a pooled
+   * account that is its balance times the owner fraction, not the whole balance —
+   * `/accounts` deliberately still shows the full figure. `outsideCapitalMdl` is the
+   * remainder, and sits OUTSIDE the net-worth identity.
+   */
   grossAssetsMdl: number;
   /** Sum of outstanding on loans the user borrowed ("I owe"), positive, in MDL. */
   externalLiabilitiesMdl: number;

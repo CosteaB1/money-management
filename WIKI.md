@@ -336,7 +336,7 @@ advice.
 
 Landing page showing a snapshot of the current financial state:
 
-- **Total assets / I owe / Net worth** — three tiles reading left to right as the equation itself. *Total assets* = sum of all non-archived account balances in MDL. *I owe* = outstanding on account-linked loans you borrowed. *Net worth* = assets − owed + money lent out (the last term only shows when non-zero). Backed by `GET /dashboard/net-worth`
+- **Total assets / I owe / Net worth** — three tiles reading left to right as the equation itself. *Total assets* = **your share** of every non-archived account balance in MDL — for a pooled account that is your fraction of it, not the whole thing, with a sub-line naming how much sits in your accounts without being yours. *I owe* = outstanding on account-linked loans you borrowed. *Net worth* = assets − owed + money lent out (the last term only shows when non-zero). Backed by `GET /dashboard/net-worth`
 - **Account balance cards** (one per account)
 - **Current month** — income vs expenses vs savings rate
 - **Budget status** — progress bars for top categories with budgets
@@ -360,8 +360,9 @@ Landing page showing a snapshot of the current financial state:
 ### 3. Accounts
 
 - List all accounts with current balance
-- Add / edit / archive / unarchive accounts; permanently delete only when an account has no transactions, imports, or linked goals (otherwise archive)
+- Add / edit / archive / unarchive accounts; permanently delete only when an account has no transactions, imports, linked goals **or capital pool** (otherwise archive)
 - Account detail view: full transaction history, balance-over-time chart
+- A **"Pooled" badge** on any account that holds other people's money. Such an account still shows its **full** balance here and in the balance-over-time chart — it really does hold that money — but its **Performance card counts only your share**, so the other participants' money in and out is excluded rather than booked as your contributions and withdrawals
 - *(Reconciliation checkpoints — deferred to v2)*
 
 ### 4. Budgets
@@ -397,7 +398,18 @@ Landing page showing a snapshot of the current financial state:
 - **Show archived** toggle on the list (accounts-page pattern) reveals archived loans with an Archived badge; archived rows/detail expose **Unarchive**. Archiving a loan that still has outstanding > 0 shows a warning in the confirm dialog (the intended lifecycle is settle → archive)
 - v1 limits: repayment currency must equal the loan currency (record the payment without an account link, or FX-transfer into a matching-currency account first); borrowing more from the same person = a second loan
 
-### 7. Reports
+### 7. Pools
+
+For an account that holds other people's money alongside your own.
+
+- List of pools with your share, outside capital, pool value and any unpaid payouts; **Show archived** toggle
+- Pool detail: value and price-per-share, who holds what **as percentages**, the full movement ledger, and a reconciliation panel that appears only when something does not add up
+- Record money in / money out, close the month, mark a payout as sent, record a shared cost, add a participant, archive the pool
+- **Every action that moves money first demands the exchange's real total right now** — including BNB — because a share is priced against the pool's value at that moment. The app refuses to record the movement without it
+- **Closing a month and paying it out are two separate steps.** Closing works out what is owed and retires the matching shares but moves no money; you mark each payout as sent on the day the transfer actually leaves
+- Nobody is paid below what they put in, so **a month the pool went up can still pay out nothing** — that is the high-water rule working, not a bug
+
+### 8. Reports
 
 All reports are filterable by date range, account(s), and category/tag.
 
@@ -411,7 +423,7 @@ All reports are filterable by date range, account(s), and category/tag.
 | **Year-over-Year** | Compare a month or category against the same period last year |
 | **Export to CSV** | Download any report or filtered transaction list as CSV |
 
-### 8. Settings
+### 9. Settings
 
 - Manage categories (add, rename, recolour, archive) *(reorder deferred)*
 - Manage accounts
