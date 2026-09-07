@@ -116,7 +116,7 @@ public class GetNetWorthTrendQueryHandlerTests
         IApplicationDbContext db,
         IFxConverter fx,
         DateTime utcNow) =>
-        new(db, fx, FakeExternalClaimSource.Empty(), Clock(utcNow));
+        new(db, fx, FakeExternalClaimSource.Empty(), [], Clock(utcNow));
 
     [Fact]
     public async Task Handle_MonthsOne_ReturnsSinglePointAtToday()

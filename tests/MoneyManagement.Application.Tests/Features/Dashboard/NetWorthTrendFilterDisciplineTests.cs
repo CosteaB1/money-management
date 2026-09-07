@@ -49,7 +49,7 @@ public sealed class NetWorthTrendFilterDisciplineTests
     // No loans in these fixtures, so the real claim source contributes nothing
     // — the assertions below stay pure account arithmetic.
     private static GetNetWorthTrendQueryHandler Handler(IApplicationDbContext db) =>
-        new(db, FakeFxConverter.Identity(), new LoanExternalClaimSource(db), Clock());
+        new(db, FakeFxConverter.Identity(), new LoanExternalClaimSource(db), [], Clock());
 
     [Fact]
     public async Task NetWorth_IncludesTransfersAndAdjustments_InTheBalance()

@@ -1,8 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using MoneyManagement.Application.Abstractions.Data;
 using MoneyManagement.Application.Abstractions.Messaging;
+using MoneyManagement.Application.Features.Pools;
 using MoneyManagement.Domain.Accounts;
 using MoneyManagement.Domain.Common;
+using MoneyManagement.Domain.Pools;
 using MoneyManagement.Domain.SavingsGoals;
 using MoneyManagement.SharedKernel;
 
@@ -33,6 +35,15 @@ internal sealed class UpdateGoalCommandHandler(
             if (!accountExists)
             {
                 return Result.Failure(AccountErrors.NotFound(linkedId));
+            }
+
+        // A pooled account's balance includes the outside investors' money, and
+        // SavingsGoal.Saved IS that balance - a linked goal would count the
+        // friends' capital as the user's progress. Blocked at both the create and
+        // the update path so a goal cannot be relinked onto one later.
+            if (await PooledAccountGuard.IsPooledAsync(db, linkedId, cancellationToken))
+            {
+                return Result.Failure(PoolErrors.GoalLinkBlocked);
             }
         }
 

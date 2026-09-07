@@ -2,10 +2,12 @@ using Microsoft.EntityFrameworkCore;
 using MoneyManagement.Application.Abstractions.Data;
 using MoneyManagement.Application.Abstractions.FxRates;
 using MoneyManagement.Application.Abstractions.Messaging;
+using MoneyManagement.Application.Features.Pools;
 using MoneyManagement.Domain.Accounts;
 using MoneyManagement.Domain.Categories;
 using MoneyManagement.Domain.Common;
 using MoneyManagement.Domain.Loans;
+using MoneyManagement.Domain.Pools;
 using MoneyManagement.Domain.Transactions;
 using MoneyManagement.SharedKernel;
 
@@ -48,6 +50,17 @@ internal sealed class CreateLoanCommandHandler(
             if (account is null)
             {
                 return Result.Failure<CreateLoanResponse>(AccountErrors.NotFound(accountId));
+            }
+
+            // A disbursement leg is cash landing on the account with NO unit
+            // event, so net worth shares it pro-rata with the outside investors
+            // - and it lands twice, because LoanExternalClaimSource books the
+            // matching claim on top. The leg is IsTransfer-flagged and written
+            // inline here, so neither CreateTransaction's nor CreateTransfer's
+            // guard ever sees it; this is the same rule, at its own door.
+            if (await PooledAccountGuard.IsPooledAsync(db, accountId, cancellationToken))
+            {
+                return Result.Failure<CreateLoanResponse>(PoolErrors.LoanMovementBlocked);
             }
 
             if (!string.Equals(account.Balance.Currency, loan.Principal.Currency, StringComparison.Ordinal))

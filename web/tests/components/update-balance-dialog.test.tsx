@@ -34,6 +34,7 @@ const xtbAccount: AccountDto = {
   currency: 'USD',
   openingDate: '2024-09-10',
   isArchived: false,
+  isPooled: false,
   notes: null,
   // Live computed balance (anchor 1500 USD + 250 USD adjustment income).
   balance: 1750,

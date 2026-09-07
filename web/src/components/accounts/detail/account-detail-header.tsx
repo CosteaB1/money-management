@@ -61,6 +61,7 @@ export function AccountDetailHeader({ account }: Props) {
     currency: account.currency,
     openingDate: account.openingDate,
     isArchived: account.isArchived,
+    isPooled: account.isPooled,
     notes: account.notes,
     balance: account.balance,
     balanceMdl: account.balanceMdl,
@@ -126,6 +127,11 @@ export function AccountDetailHeader({ account }: Props) {
             <Badge variant="outline" data-testid="account-detail-currency">
               {account.currency}
             </Badge>
+            {account.isPooled && (
+              <Badge variant="warning" data-testid="account-detail-pooled">
+                Pooled
+              </Badge>
+            )}
             {account.isArchived && (
               <Badge variant="outline" data-testid="account-detail-archived">
                 Archived
@@ -135,6 +141,23 @@ export function AccountDetailHeader({ account }: Props) {
           <p className="text-sm text-muted-foreground">
             Opened {formatShortDate(account.openingDate)}
           </p>
+          {/* The balance below is the account's FULL value even though part of
+              it belongs to other people — the account really does hold that
+              money, and /accounts, Balance over time and the monthly summary
+              all agree to show it whole. Only net worth and the Performance
+              card apply the owner's share, so this line is what stops the two
+              looking like a contradiction. */}
+          {account.isPooled && (
+            <p
+              className="text-sm text-amber-600 dark:text-amber-400"
+              data-testid="account-detail-pooled-note"
+            >
+              <Link href="/pools" className="underline underline-offset-2">
+                Part of this balance belongs to other people. The figure below is the whole account;
+                your net worth only counts your share.
+              </Link>
+            </p>
+          )}
           <div className="flex flex-wrap items-baseline gap-2">
             <span
               className="text-xl font-semibold tabular-nums"

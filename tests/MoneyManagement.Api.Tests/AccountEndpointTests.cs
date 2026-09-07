@@ -2,15 +2,19 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using MoneyManagement.Api.Tests.Support;
+using MoneyManagement.Infrastructure.Database;
 
 namespace MoneyManagement.Api.Tests;
 
 /// <summary>
 /// Endpoint coverage for <c>/accounts</c>: create, list (incl. includeArchived),
 /// detail projection, archive / unarchive, permanent delete (incl. the
-/// has-linked-records 409), and balance-change adjustments. Every test owns
-/// GUID-named entities and asserts only on those.
+/// has-linked-records 409), balance-change adjustments, and the <c>isPooled</c>
+/// flag both surfaces carry. Every test owns GUID-named entities and asserts
+/// only on those.
 /// </summary>
 [Collection(ApiCollection.Name)]
 public sealed class AccountEndpointTests(CustomWebApplicationFactory factory)
@@ -238,4 +242,76 @@ public sealed class AccountEndpointTests(CustomWebApplicationFactory factory)
         using JsonDocument problem = await _fx.ReadDocAsync(response);
         problem.RootElement.GetProperty("errorCode").GetString().Should().Be("account.not_found");
     }
+
+    [Fact]
+    public async Task Ordinary_account_reports_isPooled_false_on_both_surfaces()
+    {
+        Guid id = await _fx.CreateAccountAsync(type: "Brokerage", balance: 100m, currency: "MDL");
+
+        using JsonDocument detail = await _fx.ReadDocAsync(await Client.GetAsync($"/accounts/{id}"));
+        detail.RootElement.GetProperty("isPooled").GetBoolean().Should().BeFalse();
+
+        using JsonDocument list = await _fx.ReadDocAsync(await Client.GetAsync("/accounts"));
+        Row(list, id).GetProperty("isPooled").GetBoolean().Should().BeFalse();
+    }
+
+    /// <summary>
+    /// The flag Commit 5's "Pooled" badge hangs off, end to end on both
+    /// surfaces. It is the ONLY thing a pool changes here: the balance stays the
+    /// account's full value on the list AND on the detail, because the account
+    /// really does hold the other participants' money. Only the net-worth
+    /// surfaces and the detail page's Performance card take the owner's share.
+    /// </summary>
+    [Fact]
+    public async Task Pooling_an_account_flips_isPooled_on_both_surfaces()
+    {
+        Guid id = await _fx.CreateAccountAsync(type: "CryptoExchange", balance: 1_000m, currency: "USD");
+
+        try
+        {
+            // Seeded at the balance the app already derives, so the create
+            // writes no catch-up mark and the account keeps exactly its 1,000.
+            HttpResponseMessage created = await Client.PostAsJsonAsync("/pools", new
+            {
+                accountId = id,
+                name = _fx.Unique("Pool"),
+                currency = "USD",
+                inceptionDate = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd"),
+                ownerName = "Me",
+                poolValueAtInception = 1_000m,
+                notes = (string?)null,
+                backdatedSubscriptions = (object?)null,
+            });
+
+            created.StatusCode.Should().Be(HttpStatusCode.Created, await created.Content.ReadAsStringAsync());
+
+            using JsonDocument detail = await _fx.ReadDocAsync(await Client.GetAsync($"/accounts/{id}"));
+            detail.RootElement.GetProperty("isPooled").GetBoolean().Should().BeTrue();
+            detail.RootElement.GetProperty("balance").GetDecimal().Should().Be(1_000m);
+
+            using JsonDocument list = await _fx.ReadDocAsync(await Client.GetAsync("/accounts"));
+            JsonElement row = Row(list, id);
+            row.GetProperty("isPooled").GetBoolean().Should().BeTrue();
+            row.GetProperty("balance").GetDecimal().Should().Be(1_000m);
+        }
+        finally
+        {
+            // money_management_inttest must be left with ZERO pools:
+            // BackupRoundTripTests asserts a restored baseline carries none, and
+            // one pool per account is enforced forever. Participants and unit
+            // events go with it through the database's own CASCADE.
+            using IServiceScope scope = factory.Services.CreateScope();
+            ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+            await db.Pools
+                .IgnoreQueryFilters()
+                .Where(p => p.AccountId == id)
+                .ExecuteDeleteAsync();
+        }
+    }
+
+    private static JsonElement Row(JsonDocument list, Guid accountId) =>
+        list.RootElement
+            .EnumerateArray()
+            .Single(a => a.GetProperty("id").GetGuid() == accountId);
 }

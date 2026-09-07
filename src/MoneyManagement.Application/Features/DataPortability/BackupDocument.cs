@@ -2,6 +2,7 @@ using MoneyManagement.Domain.Accounts;
 using MoneyManagement.Domain.Categories;
 using MoneyManagement.Domain.Imports;
 using MoneyManagement.Domain.Loans;
+using MoneyManagement.Domain.Pools;
 using MoneyManagement.Domain.Transactions;
 
 namespace MoneyManagement.Application.Features.DataPortability;
@@ -19,6 +20,13 @@ namespace MoneyManagement.Application.Features.DataPortability;
 /// keyword rules) IS backed up — it is a child of <c>categories</c> via an
 /// <c>ON DELETE CASCADE</c> FK, so a restore that wipes <c>categories</c> would
 /// otherwise cascade-delete every pattern with no way to reinstate them.
+/// </para>
+/// <para>
+/// The pool tables (<c>pools</c>, <c>pool_participants</c>, <c>pool_unit_events</c>)
+/// are backed up as of schema v6. <c>pool_unit_events</c> references BOTH
+/// <c>transactions</c> and <c>pool_participants</c>, which fixes its position at
+/// both ends of a restore: wiped child-first BEFORE transactions and accounts,
+/// reinserted LAST.
 /// </para>
 /// <para>
 /// The <c>fx_rates</c> table is deliberately EXCLUDED from the backup — rates are
@@ -39,7 +47,10 @@ public sealed record BackupDocument(
     IReadOnlyList<SavingsGoalBackup> SavingsGoals,
     IReadOnlyList<SavingsGoalContributionBackup> SavingsGoalContributions,
     IReadOnlyList<LoanBackup> Loans,
-    IReadOnlyList<LoanPaymentBackup> LoanPayments);
+    IReadOnlyList<LoanPaymentBackup> LoanPayments,
+    IReadOnlyList<PoolBackup> Pools,
+    IReadOnlyList<PoolParticipantBackup> PoolParticipants,
+    IReadOnlyList<PoolUnitEventBackup> PoolUnitEvents);
 
 /// <summary>Mirrors the <c>accounts</c> table (<c>Balance</c> is the Money pair).</summary>
 public sealed record AccountBackup(
@@ -195,6 +206,72 @@ public sealed record LoanPaymentBackup(
     string AmountCurrency,
     DateOnly OccurredOn,
     Guid? TransactionId,
+    string? Notes,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+/// <summary>
+/// Mirrors the <c>pools</c> table. <c>AccountId</c> FKs <c>accounts</c> (ON
+/// DELETE RESTRICT) and is UNIQUE, so on restore these rows must be reinserted
+/// AFTER accounts, and wiped BEFORE them.
+/// </summary>
+public sealed record PoolBackup(
+    Guid Id,
+    Guid AccountId,
+    string Name,
+    string Currency,
+    DateOnly InceptionDate,
+    string? Notes,
+    bool IsArchived,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+/// <summary>
+/// Mirrors the <c>pool_participants</c> table. <c>PoolId</c> FKs <c>pools</c>
+/// (ON DELETE CASCADE). A partial unique index allows only one
+/// <c>IsOwner = true</c> row per pool, so a hand-edited document carrying two
+/// owners is rejected by the database mid-restore and the whole transaction
+/// rolls back.
+/// </summary>
+public sealed record PoolParticipantBackup(
+    Guid Id,
+    Guid PoolId,
+    string Name,
+    bool IsOwner,
+    DateOnly JoinedOn,
+    bool IsArchived,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+/// <summary>
+/// Mirrors the <c>pool_unit_events</c> table - the pool's whole ledger.
+/// <para>
+/// <c>Units</c> and <c>NavPerUnit</c> are <c>numeric(28,12)</c>, not the
+/// repo's 2dp money scale; JSON round-trips <see cref="decimal"/> losslessly,
+/// so a NAV of <c>1.000001234567</c> survives export and re-import digit for
+/// digit. <c>CashValue</c> / <c>CashCurrency</c> are the paired columns behind
+/// the entity's nullable <c>Money?</c> (both NULL for Seed / CostShare /
+/// CostRecovery). <c>SettledOn</c> is NULL on an unpaid distribution.
+/// </para>
+/// <para>
+/// FKs <c>pools</c> and <c>pool_participants</c> (CASCADE) and
+/// <c>transactions</c> (SET NULL), so on restore these rows are reinserted
+/// LAST - after transactions AND after participants.
+/// </para>
+/// </summary>
+public sealed record PoolUnitEventBackup(
+    Guid Id,
+    Guid PoolId,
+    Guid ParticipantId,
+    PoolUnitEventKind Kind,
+    DateOnly OccurredOn,
+    decimal Units,
+    decimal NavPerUnit,
+    decimal PoolValuePreMoney,
+    decimal? CashValue,
+    string? CashCurrency,
+    DateOnly? SettledOn,
+    Guid? MovementTransactionId,
     string? Notes,
     DateTime CreatedAt,
     DateTime UpdatedAt);

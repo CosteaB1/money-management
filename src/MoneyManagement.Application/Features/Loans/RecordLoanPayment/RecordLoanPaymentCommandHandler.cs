@@ -2,10 +2,12 @@ using Microsoft.EntityFrameworkCore;
 using MoneyManagement.Application.Abstractions.Data;
 using MoneyManagement.Application.Abstractions.FxRates;
 using MoneyManagement.Application.Abstractions.Messaging;
+using MoneyManagement.Application.Features.Pools;
 using MoneyManagement.Domain.Accounts;
 using MoneyManagement.Domain.Categories;
 using MoneyManagement.Domain.Common;
 using MoneyManagement.Domain.Loans;
+using MoneyManagement.Domain.Pools;
 using MoneyManagement.Domain.Transactions;
 using MoneyManagement.SharedKernel;
 
@@ -70,6 +72,16 @@ internal sealed class RecordLoanPaymentCommandHandler(
             if (account is null)
             {
                 return Result.Failure<RecordLoanPaymentResponse>(AccountErrors.NotFound(accountId));
+            }
+
+            // CreateLoan's guard in the opposite direction: cash LEAVING the
+            // pooled account with no unit event means the owner silently funds
+            // part of the outside investors' stake, since the fraction is
+            // applied to whatever is left. Same inline-leg blind spot, same
+            // answer - move the loan through a non-pooled account.
+            if (await PooledAccountGuard.IsPooledAsync(db, accountId, cancellationToken))
+            {
+                return Result.Failure<RecordLoanPaymentResponse>(PoolErrors.LoanMovementBlocked);
             }
 
             if (!string.Equals(account.Balance.Currency, loan.Principal.Currency, StringComparison.Ordinal))

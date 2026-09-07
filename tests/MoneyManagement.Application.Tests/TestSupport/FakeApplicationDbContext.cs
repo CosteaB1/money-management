@@ -6,6 +6,7 @@ using MoneyManagement.Domain.Categories;
 using MoneyManagement.Domain.FxRates;
 using MoneyManagement.Domain.Imports;
 using MoneyManagement.Domain.Loans;
+using MoneyManagement.Domain.Pools;
 using MoneyManagement.Domain.SavingsGoals;
 using MoneyManagement.Domain.Transactions;
 using NSubstitute;
@@ -33,7 +34,10 @@ internal static class FakeApplicationDbContext
         IEnumerable<SavingsGoal>? savingsGoals = null,
         IEnumerable<SavingsGoalContribution>? savingsGoalContributions = null,
         IEnumerable<Loan>? loans = null,
-        IEnumerable<LoanPayment>? loanPayments = null)
+        IEnumerable<LoanPayment>? loanPayments = null,
+        IEnumerable<Pool>? pools = null,
+        IEnumerable<PoolParticipant>? poolParticipants = null,
+        IEnumerable<PoolUnitEvent>? poolUnitEvents = null)
     {
         DbSet<Account> accountSet = new FakeDbSet<Account>(accounts ?? []);
         DbSet<FxRate> fxRateSet = new FakeDbSet<FxRate>(fxRates ?? []);
@@ -48,6 +52,9 @@ internal static class FakeApplicationDbContext
             new FakeDbSet<SavingsGoalContribution>(savingsGoalContributions ?? []);
         DbSet<Loan> loanSet = new FakeDbSet<Loan>(loans ?? []);
         DbSet<LoanPayment> loanPaymentSet = new FakeDbSet<LoanPayment>(loanPayments ?? []);
+        DbSet<Pool> poolSet = new FakeDbSet<Pool>(pools ?? []);
+        DbSet<PoolParticipant> poolParticipantSet = new FakeDbSet<PoolParticipant>(poolParticipants ?? []);
+        DbSet<PoolUnitEvent> poolUnitEventSet = new FakeDbSet<PoolUnitEvent>(poolUnitEvents ?? []);
 
         IApplicationDbContext db = Substitute.For<IApplicationDbContext>();
         db.Accounts.Returns(accountSet);
@@ -62,6 +69,9 @@ internal static class FakeApplicationDbContext
         db.SavingsGoalContributions.Returns(contributionSet);
         db.Loans.Returns(loanSet);
         db.LoanPayments.Returns(loanPaymentSet);
+        db.Pools.Returns(poolSet);
+        db.PoolParticipants.Returns(poolParticipantSet);
+        db.PoolUnitEvents.Returns(poolUnitEventSet);
         return db;
     }
 }

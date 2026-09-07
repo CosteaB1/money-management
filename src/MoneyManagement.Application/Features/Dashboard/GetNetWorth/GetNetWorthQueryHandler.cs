@@ -19,11 +19,19 @@ namespace MoneyManagement.Application.Features.Dashboard.GetNetWorth;
 /// explicit, because silently sharing one as-of between them is exactly the bug
 /// class this slice exists to avoid.
 /// </para>
+/// <para>
+/// Gross assets are the user's SHARE of each account, not its whole balance:
+/// outside capital (see <see cref="IAccountOwnershipSource"/>) is split off
+/// before anything else happens, so it never enters the identity and never has
+/// to be subtracted back out. With no ownership source registered every fraction
+/// is 1 and the arithmetic is bit-for-bit what it was.
+/// </para>
 /// </summary>
 internal sealed class GetNetWorthQueryHandler(
     IApplicationDbContext db,
     IFxConverter fxConverter,
     IExternalClaimSource claimSource,
+    IEnumerable<IAccountOwnershipSource> ownershipSources,
     IDateTimeProvider clock)
     : IQueryHandler<GetNetWorthQuery, NetWorthDto>
 {
@@ -41,7 +49,13 @@ internal sealed class GetNetWorthQueryHandler(
 
         AccountBalanceLedger ledger = await AccountBalanceLedger.LoadAsync(db, cancellationToken);
 
+        // Hoisted out of the loop for the same reason the balance ledger is:
+        // one round-trip per source for the whole request, then in-memory slicing.
+        AccountOwnershipLedger ownership =
+            await AccountOwnershipLedger.LoadAsync(ownershipSources, cancellationToken);
+
         decimal grossAssetsMdl = 0m;
+        decimal outsideCapitalMdl = 0m;
         int accountsMissingFxRate = 0;
 
         foreach (Account account in accounts)
@@ -57,11 +71,18 @@ internal sealed class GetNetWorthQueryHandler(
 
             if (converted is null)
             {
+                // Drops out of BOTH legs, not just gross: we know neither half of
+                // an amount we can't value at all.
                 accountsMissingFxRate++;
                 continue;
             }
 
-            grossAssetsMdl += converted.Value;
+            // Split AFTER conversion. FX is a pure multiply, so owned + outside
+            // still sums back to the converted whole, and it costs zero extra
+            // rate lookups compared with converting each half separately.
+            decimal owned = ownership.OwnedFractionAsOf(account.Id, today);
+            grossAssetsMdl += converted.Value * owned;
+            outsideCapitalMdl += converted.Value * (1m - owned);
         }
 
         IReadOnlyList<ExternalClaim> claims = await claimSource.GetHistoryAsync(cancellationToken);
@@ -109,6 +130,7 @@ internal sealed class GetNetWorthQueryHandler(
             externalAssetsMdl,
             grossAssetsMdl - liabilitiesMdl + externalAssetsMdl,
             accountsMissingFxRate,
-            claimsMissingFxRate));
+            claimsMissingFxRate,
+            outsideCapitalMdl));
     }
 }

@@ -27,6 +27,17 @@ export interface AccountDto {
   /** ISO date string (yyyy-MM-dd) */
   openingDate: string;
   isArchived: boolean;
+  /**
+   * True when a NON-archived pool sits on this account — outside investors
+   * hold a share of the money in it.
+   *
+   * `balance` / `balanceMdl` stay the account's FULL value regardless: the
+   * account really does hold the participants' money, and that read-side
+   * divergence was decided explicitly. Only the net-worth card, the net-worth
+   * trend and the account-detail Performance card apply the owner's share.
+   * This flag is what lets the UI say which of the two a given number is.
+   */
+  isPooled: boolean;
   notes: string | null;
   /**
    * Live computed balance in the account's native currency:
@@ -571,6 +582,22 @@ export interface NetWorthDto {
   accountsMissingFxRate: number;
   /** Count of loans whose outstanding could not be converted to MDL. */
   loansMissingFxRate: number;
+  /**
+   * Other people's money sitting inside the user's non-archived accounts, as
+   * a POSITIVE magnitude in MDL — pooled capital held on someone else's
+   * behalf.
+   *
+   * Deliberately OUTSIDE the net-worth identity: `netWorthMdl` stays exactly
+   * `grossAssetsMdl - externalLiabilitiesMdl + externalAssetsMdl`, and this
+   * figure is ALREADY excluded from `grossAssetsMdl`. Adding or subtracting it
+   * anywhere in that equation double-counts. It exists so the UI can explain
+   * the gap between an account's displayed balance and its contribution to
+   * net worth.
+   *
+   * Optional on the client because pre-pool backends (and a few older test
+   * fixtures) omit it; treat a missing value as 0.
+   */
+  outsideCapitalMdl?: number;
 }
 
 /**
@@ -921,6 +948,12 @@ export interface AccountDetailDto {
   /** ISO date string (yyyy-MM-dd) */
   openingDate: string;
   isArchived: boolean;
+  /**
+   * True when a NON-archived pool sits on this account. See
+   * `AccountDto.isPooled` — `balance`/`balanceMdl` remain gross, while
+   * `allTime`/`yearToDate` below are already the OWNER's share only.
+   */
+  isPooled: boolean;
   notes: string | null;
   /** Live native-currency balance — see AccountDto.balance for semantics. */
   balance: number;
@@ -1142,4 +1175,503 @@ export interface ImportDataResponse {
   budgetPeriods: number;
   savingsGoals: number;
   savingsGoalContributions: number;
+}
+
+// TODO: regenerate via `npm run gen:api` once the /pools endpoints land in OpenAPI.
+
+/**
+ * What a pool unit event did to a participant's unit balance, and whether real
+ * cash moved alongside it. Serialized as a string by the backend
+ * (`JsonStringEnumConverter`).
+ *
+ *  - `Seed`         → bootstrap. The owner's EXISTING account balance becomes
+ *                     units at a NAV of 1. No cash, no transaction, one per pool.
+ *  - `Subscription` → cash in; mints units at the prevailing NAV.
+ *  - `Redemption`   → cash out; burns units at the prevailing NAV.
+ *  - `Distribution` → profit payout. TWO-PHASE: the month closes (units burn)
+ *                     on `occurredOn`, the transfer physically leaves later.
+ *                     The only kind allowed to carry cash with a null `settledOn`.
+ *  - `CostShare`    → a participant's share of a pool cost the owner paid out of
+ *                     pocket. Pure unit transfer, no cash leg.
+ *  - `CostRecovery` → the owner side of that same transfer.
+ *
+ * Subscriptions and redemptions are NAV-invariant by construction: struck at
+ * NAV, they leave the per-unit value unchanged for everyone else.
+ */
+export type PoolUnitEventKind =
+  | 'Seed'
+  | 'Subscription'
+  | 'Redemption'
+  | 'Distribution'
+  | 'CostShare'
+  | 'CostRecovery';
+
+/**
+ * Mirrors the backend PoolDto (the `/pools` list row).
+ *
+ * Every native monetary field is in the pool's own `currency`, which always
+ * equals the account's — the pool never does FX. `poolValueMdl` and
+ * `outsideCapitalMdl` are the reporting-currency conversion at TODAY's rate,
+ * `null` with `missingFxRate` flipped when no usable rate exists. Same contract
+ * as `AccountDto.balanceMdl`: never a silent zero, never an implicit 1:1.
+ */
+export interface PoolDto {
+  id: string;
+  /** The account the capital physically sits in. */
+  accountId: string;
+  /** That account's name; an archived account still labels its pool. */
+  accountName: string;
+  name: string;
+  /** ISO 4217 currency code (e.g. "USD"). */
+  currency: string;
+  /** ISO date string (yyyy-MM-dd) — the day the pool started; the seed is dated here. */
+  inceptionDate: string;
+  notes: string | null;
+  isArchived: boolean;
+  /** The account's DERIVED balance today, gross of anything owed out. */
+  accountBalance: number;
+  /**
+   * Closed-but-unpaid distributions still sitting in the account. Subtracted
+   * from `accountBalance` to get `poolValue` — skip that and the money counts
+   * as pool value a second time and the friends are paid twice on it.
+   */
+  unpaidDistributionCash: number;
+  unpaidDistributionCount: number;
+  /** `accountBalance - unpaidDistributionCash`. What units are priced against. */
+  poolValue: number;
+  /** MDL-equivalent of `poolValue`, or null when no FX rate exists. */
+  poolValueMdl: number | null;
+  /** Units outstanding across every participant, archived included. */
+  totalUnits: number;
+  /** `poolValue / totalUnits`, or null when no units are outstanding — never a placeholder. */
+  navPerUnit: number | null;
+  /** Non-archived participants, the owner included. */
+  participantCount: number;
+  /** The user's share of the pool, in [0, 1]. */
+  ownerFraction: number;
+  /** Sum of the non-owner stakes: other people's money, POSITIVE, in `currency`. */
+  outsideCapital: number;
+  /** MDL-equivalent of `outsideCapital`, or null when no FX rate exists. */
+  outsideCapitalMdl: number | null;
+  /** True when any MDL field above could not be valued. */
+  missingFxRate: boolean;
+}
+
+/**
+ * One holder's position in the pool, valued at `PoolDetailDto.asOf`.
+ *
+ * The UI speaks "share" and percentages — `units` is audit vocabulary and
+ * belongs in the event ledger, not here.
+ */
+export interface PoolParticipantDto {
+  id: string;
+  name: string;
+  isOwner: boolean;
+  isArchived: boolean;
+  /** ISO date string (yyyy-MM-dd) */
+  joinedOn: string;
+  /** Sum of their signed unit deltas. */
+  units: number;
+  /** `units / totalUnits * 100`, to 6dp. Zero when the pool holds no units. */
+  ownershipPercent: number;
+  /** `units * navPerUnit`, to the cent — null when NAV is undefined. */
+  stake: number | null;
+  /** MDL-equivalent of `stake`, or null when no FX rate exists. */
+  stakeMdl: number | null;
+  /**
+   * `sum(subscription cash) - sum(redemption cash)`. Distributions never move
+   * it, which IS the high-water mark — no stored field, no reset logic.
+   */
+  capitalBase: number;
+  /**
+   * `max(0, stake - max(0, capitalBase))`. **Zero is a real answer**: a green
+   * month after a drawdown correctly pays nothing while the holder is still at
+   * or below their capital base.
+   *
+   * Read the OWNER's value with care — a seed carries no cash, so the owner's
+   * capital base is 0 and their "distributable" is their whole stake. That is
+   * the formula being honest, not an amount to pay out; the owner's profit
+   * stays in and grows their share.
+   */
+  distributable: number | null;
+  /** Closed-but-unpaid payouts owed to this participant. */
+  unpaidDistributionCash: number;
+  unpaidDistributionCount: number;
+  /** True when `stakeMdl` could not be valued. */
+  missingFxRate: boolean;
+}
+
+/** One row of the pool's ledger. */
+export interface PoolUnitEventDto {
+  id: string;
+  participantId: string;
+  participantName: string;
+  kind: PoolUnitEventKind;
+  /** ISO date string (yyyy-MM-dd) */
+  occurredOn: string;
+  /** Positive magnitude; `kind` carries the direction. */
+  units: number;
+  /** The signed effect on the participant's balance. */
+  unitsDelta: number;
+  /** The price the units were struck at. AUDIT ONLY — never enters the ownership fraction. */
+  navPerUnit: number;
+  /** The pool's total value immediately before this event. Zero for a seed. */
+  poolValuePreMoney: number;
+  /** Money that actually moved; null for Seed, CostShare and CostRecovery. */
+  cash: number | null;
+  cashCurrency: string | null;
+  /** ISO date string (yyyy-MM-dd) — null on an unpaid distribution, and only there. */
+  settledOn: string | null;
+  /** A distribution that has closed but not yet been paid out. */
+  isUnpaid: boolean;
+  movementTransactionId: string | null;
+  movementAccountId: string | null;
+  movementAccountName: string | null;
+  notes: string | null;
+}
+
+/** A transaction on the pool account with no unit event behind it. */
+export interface UnmatchedPoolTransactionDto {
+  transactionId: string;
+  /** ISO date string (yyyy-MM-dd) */
+  transactionDate: string;
+  description: string;
+  direction: TransactionDirection;
+  amount: number;
+  currency: string;
+  isTransfer: boolean;
+}
+
+/** An event priced against a pool value the ledger can no longer reproduce. */
+export interface PoolValueDriftDto {
+  eventId: string;
+  /** ISO date string (yyyy-MM-dd) */
+  occurredOn: string;
+  kind: PoolUnitEventKind;
+  recordedPreMoney: number;
+  derivedPreMoney: number;
+  /** `recordedPreMoney - derivedPreMoney`. */
+  drift: number;
+}
+
+/** A unit event claiming cash the account never saw. */
+export interface UnbackedPoolCashClaimDto {
+  eventId: string;
+  /** ISO date string (yyyy-MM-dd) */
+  settledOn: string;
+  direction: TransactionDirection;
+  amount: number;
+}
+
+/**
+ * The pool's ledger replayed against reality. **Reports; never corrects.**
+ * Everything here is recoverable by hand and unrecoverable if silently
+ * "fixed" — a value drift means somebody edited history after units were
+ * priced, and the right answer depends on which of the two records is wrong.
+ */
+export interface PoolReconciliationDto {
+  /** True when all four checks pass. The only field a badge needs. */
+  isClean: boolean;
+  /** Money that moved on the pool account with no unit event to account for it. */
+  unmatchedTransactions: UnmatchedPoolTransactionDto[];
+  /** Sum of units across the roster. */
+  participantUnits: number;
+  /** Sum of unit deltas across the ledger. */
+  ledgerUnits: number;
+  /** `participantUnits - ledgerUnits`. */
+  unitsDrift: number;
+  /** Whether the two agree to within dust. */
+  unitsBalance: boolean;
+  valueDrifts: PoolValueDriftDto[];
+  unbackedCashClaims: UnbackedPoolCashClaimDto[];
+}
+
+/**
+ * GET /pools/{id} — the drill-down projection. Carries the same valuation
+ * surface as `PoolDto` plus the roster, the full ledger newest-first, the
+ * mark-staleness warning and the reconciliation tripwire.
+ *
+ * Reachable for ARCHIVED pools, the same rule the loan and goal detail pages
+ * follow.
+ */
+export interface PoolDetailDto {
+  id: string;
+  accountId: string;
+  accountName: string;
+  accountCurrency: string;
+  accountIsArchived: boolean;
+  name: string;
+  currency: string;
+  /** ISO date string (yyyy-MM-dd) */
+  inceptionDate: string;
+  notes: string | null;
+  isArchived: boolean;
+  /** ISO 8601 timestamp — when the pool was created in the app. */
+  createdOn: string;
+  /** ISO date string (yyyy-MM-dd) — the date every figure below is evaluated at. */
+  asOf: string;
+  accountBalance: number;
+  unpaidDistributionCash: number;
+  unpaidDistributionCount: number;
+  poolValue: number;
+  poolValueMdl: number | null;
+  totalUnits: number;
+  navPerUnit: number | null;
+  /** The user's own participant row. Null only on a corrupt pool. */
+  ownerParticipantId: string | null;
+  ownerFraction: number;
+  outsideCapital: number;
+  outsideCapitalMdl: number | null;
+  missingFxRate: boolean;
+  /**
+   * ISO date string (yyyy-MM-dd) — **the last time the pool's value was
+   * CONFIRMED**, or null when it never has been.
+   *
+   * A NAV struck against a stale mark is the main way this model goes quietly
+   * wrong: every subscription, redemption and distribution is priced off the
+   * account's derived balance, and if that balance is weeks old in an account
+   * that moves, units are minted or burned at the wrong price and the error is
+   * permanent.
+   */
+  lastMarkDate: string | null;
+  /** Days between `lastMarkDate` and `asOf`; null when there is no mark. */
+  markAgeDays: number | null;
+  /** The roster, owner first. Archived participants included — they are part of the unit total. */
+  participants: PoolParticipantDto[];
+  /** The full ledger, NEWEST first. */
+  events: PoolUnitEventDto[];
+  reconciliation: PoolReconciliationDto;
+}
+
+/**
+ * POST /pools request body.
+ *
+ * `currency` must equal the account's, and the account's type must be one that
+ * can take a balance adjustment (Brokerage / CryptoExchange / P2PLending /
+ * BankDeposit) — an account that can never be re-priced would freeze the pool's
+ * NAV at inception.
+ *
+ * `poolValueAtInception` is the exchange's REAL total on the inception date.
+ * Supplying it writes a catch-up mark before the owner is seeded, so the seed
+ * is struck against the truth rather than against a stale derived balance.
+ */
+export interface CreatePoolRequest {
+  accountId: string;
+  name: string;
+  /** ISO 4217 currency code (e.g. "USD"). */
+  currency: string;
+  /** ISO date string (yyyy-MM-dd) */
+  inceptionDate: string;
+  /** Display name for the user's own participant row (e.g. "Me"). */
+  ownerName: string;
+  poolValueAtInception?: number | null;
+  notes?: string | null;
+  /** Subscriptions that already happened, replayed at the NAV of their own day. */
+  backdatedSubscriptions?: BackdatedSubscriptionRequest[] | null;
+}
+
+/**
+ * One participant's already-completed subscription, replayed into the ledger at
+ * the NAV that applied on the day their money actually arrived.
+ *
+ * `poolValuePreMoney` is REQUIRED and deliberately not defaulted: the account's
+ * derived balance on that date already contains their cash, so guessing would
+ * price them at their own money.
+ */
+export interface BackdatedSubscriptionRequest {
+  participantName: string;
+  /** ISO date string (yyyy-MM-dd) — between inception and today. */
+  occurredOn: string;
+  cash: number;
+  poolValuePreMoney: number;
+  /** True when the arrival was never recorded on the account and needs a row written. */
+  writeMovementTransaction?: boolean;
+  notes?: string | null;
+}
+
+export interface CreatedPoolParticipant {
+  id: string;
+  name: string;
+  isOwner: boolean;
+  units: number;
+}
+
+export interface CreatePoolResponse {
+  id: string;
+  ownerParticipantId: string;
+  seedUnits: number;
+  /** Signed catch-up applied to the account, or 0 when none was needed. */
+  markDelta: number;
+  markTransactionId: string | null;
+  participants: CreatedPoolParticipant[];
+}
+
+/** POST /pools/{id}/participants request body. */
+export interface AddPoolParticipantRequest {
+  name: string;
+  /** ISO date string (yyyy-MM-dd) */
+  joinedOn: string;
+}
+
+export interface AddPoolParticipantResponse {
+  id: string;
+}
+
+/**
+ * POST /pools/{id}/subscriptions request body.
+ *
+ * `poolValueNow` is the exchange's REAL total across every sub-wallet,
+ * **including BNB**, read immediately before the money crosses the boundary.
+ * It is a hard requirement, not a convenience: the handler marks the account to
+ * it BEFORE striking the NAV, and a subscription priced off a stale balance
+ * silently transfers value between the owner and the participants — permanently.
+ */
+export interface RecordSubscriptionRequest {
+  participantId: string;
+  poolValueNow: number;
+  cash: number;
+  notes?: string | null;
+}
+
+export interface RecordSubscriptionResponse {
+  eventId: string;
+  units: number;
+  navPerUnit: number;
+  poolValuePreMoney: number;
+  markDelta: number;
+  markTransactionId: string | null;
+  movementTransactionId: string;
+}
+
+/**
+ * POST /pools/{id}/redemptions request body. `destinationAccountId` writes the
+ * receiving leg of a two-leg transfer (e.g. Binance to Bybit); omit it when the
+ * money leaves for somewhere the app does not track.
+ */
+export interface RecordRedemptionRequest {
+  participantId: string;
+  poolValueNow: number;
+  cash: number;
+  destinationAccountId?: string | null;
+  notes?: string | null;
+  /**
+   * "Yes, this really is the whole pool." Opt-in acknowledgement that relaxes
+   * the guard which normally rejects cash equal to the account's balance —
+   * that guard exists because the demonstrated slip is a BALANCE typed into an
+   * AMOUNT field, but the last redemption of a pool genuinely *is* the whole
+   * pool value, so a wind-down has no other path through the API.
+   *
+   * **Not a bypass switch.** The backend refutes the claim: if any shares would
+   * remain outstanding afterwards the command fails. Defaults to false.
+   */
+  isFullWindDown?: boolean;
+}
+
+export interface RecordRedemptionResponse {
+  eventId: string;
+  units: number;
+  navPerUnit: number;
+  poolValuePreMoney: number;
+  markDelta: number;
+  markTransactionId: string | null;
+  movementTransactionId: string;
+  counterTransactionId: string | null;
+}
+
+/** One line of a monthly close. Omit `cash` to pay the participant's full distributable. */
+export interface DistributionPayoutRequest {
+  participantId: string;
+  cash?: number | null;
+}
+
+/**
+ * POST /pools/{id}/distributions request body — **closes the month**.
+ *
+ * Closing marks the pool, retires units at that NAV and records what is owed.
+ * **No money moves.** The transfer is a separate, later step
+ * (`SettleDistributionRequest`) dated the day the cash actually leaves — date
+ * the payout at the close and the next snapshot still contains that cash, so
+ * the app re-attributes it as fresh profit and pays the participants twice on
+ * it.
+ *
+ * Omit `payouts` entirely to pay every non-owner their full distributable.
+ */
+export interface CloseDistributionRequest {
+  poolValueNow: number;
+  payouts?: DistributionPayoutRequest[] | null;
+  notes?: string | null;
+}
+
+export interface DistributionLine {
+  eventId: string;
+  participantId: string;
+  participantName: string;
+  units: number;
+  cash: number;
+}
+
+export interface CloseDistributionResponse {
+  navPerUnit: number;
+  poolValuePreMoney: number;
+  markDelta: number;
+  markTransactionId: string | null;
+  /** Sum of every line — owed, not yet paid. */
+  totalCash: number;
+  lines: DistributionLine[];
+}
+
+/**
+ * POST /pools/{id}/distributions/{eventId}/settle request body. Writes the real
+ * transaction on the day the transfer physically settled; `settledOn` defaults
+ * to today when omitted.
+ */
+export interface SettleDistributionRequest {
+  /** ISO date string (yyyy-MM-dd) */
+  settledOn?: string | null;
+  notes?: string | null;
+}
+
+export interface SettleDistributionResponse {
+  transactionId: string;
+  /** ISO date string (yyyy-MM-dd) */
+  settledOn: string;
+  cash: number;
+}
+
+/**
+ * POST /pools/{id}/cost-reimbursements request body.
+ *
+ * A cost the OWNER paid out of pocket (a server bill, say) that the
+ * participants reimburse pro-rata. The money never enters the account, so this
+ * mints no value: it is a PURE UNIT TRANSFER from the participants to the
+ * owner at the prevailing NAV. Total units, pool value and NAV are all
+ * unchanged.
+ *
+ * `poolValueNow` is optional here — and only here — because no cash crosses the
+ * boundary. Supplying it re-marks the account first so the transfer is struck
+ * at a fresh NAV, which is still the better answer.
+ */
+export interface RecordCostReimbursementRequest {
+  /** The full cost, in the pool's currency. Participants bear their share of it. */
+  amount: number;
+  poolValueNow?: number | null;
+  notes?: string | null;
+}
+
+export interface CostShareLine {
+  eventId: string;
+  participantId: string;
+  participantName: string;
+  units: number;
+  amount: number;
+}
+
+export interface RecordCostReimbursementResponse {
+  navPerUnit: number;
+  totalUnitsTransferred: number;
+  totalAmountRecovered: number;
+  markDelta: number;
+  markTransactionId: string | null;
+  ownerEventId: string;
+  lines: CostShareLine[];
 }

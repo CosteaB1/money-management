@@ -55,7 +55,7 @@ public sealed class AccountDetailYtdBoundaryTests
         Transaction jan1 = Contribution(acct.Id, 100m, new DateOnly(2026, 1, 1));
 
         IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [acct], transactions: [jan1]);
-        var handler = new GetAccountDetailQueryHandler(db, FakeFxConverter.Identity(), Clock());
+        var handler = new GetAccountDetailQueryHandler(db, FakeFxConverter.Identity(), [], Clock());
 
         Result<AccountDetailDto> result = await handler.Handle(new GetAccountDetailQuery(acct.Id), CancellationToken.None);
 
@@ -71,7 +71,7 @@ public sealed class AccountDetailYtdBoundaryTests
         Transaction dec31 = Contribution(acct.Id, 100m, new DateOnly(2025, 12, 31));
 
         IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [acct], transactions: [dec31]);
-        var handler = new GetAccountDetailQueryHandler(db, FakeFxConverter.Identity(), Clock());
+        var handler = new GetAccountDetailQueryHandler(db, FakeFxConverter.Identity(), [], Clock());
 
         Result<AccountDetailDto> result = await handler.Handle(new GetAccountDetailQuery(acct.Id), CancellationToken.None);
 
@@ -88,7 +88,7 @@ public sealed class AccountDetailYtdBoundaryTests
         Transaction todayTx = Contribution(acct.Id, 250m, today);
 
         IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [acct], transactions: [todayTx]);
-        var handler = new GetAccountDetailQueryHandler(db, FakeFxConverter.Identity(), Clock());
+        var handler = new GetAccountDetailQueryHandler(db, FakeFxConverter.Identity(), [], Clock());
 
         Result<AccountDetailDto> result = await handler.Handle(new GetAccountDetailQuery(acct.Id), CancellationToken.None);
 

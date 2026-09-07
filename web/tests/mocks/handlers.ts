@@ -12,6 +12,8 @@ import type {
   LoanDto,
   NetWorthDto,
   PagedResult,
+  PoolDetailDto,
+  PoolDto,
   StatementPreviewDto,
   TransactionDto,
 } from '@/src/types/api';
@@ -24,6 +26,7 @@ const accounts: AccountDto[] = [
     currency: 'MDL',
     openingDate: '2025-01-01',
     isArchived: false,
+    isPooled: false,
     notes: null,
     balance: 500,
     balanceMdl: 500,
@@ -35,6 +38,7 @@ const accounts: AccountDto[] = [
     currency: 'MDL',
     openingDate: '2024-06-15',
     isArchived: false,
+    isPooled: false,
     notes: null,
     balance: -1200,
     balanceMdl: -1200,
@@ -46,6 +50,7 @@ const accounts: AccountDto[] = [
     currency: 'MDL',
     openingDate: '2024-03-01',
     isArchived: false,
+    isPooled: false,
     notes: null,
     balance: 22550,
     balanceMdl: 22550,
@@ -57,6 +62,7 @@ const accounts: AccountDto[] = [
     currency: 'USD',
     openingDate: '2024-09-10',
     isArchived: false,
+    isPooled: false,
     notes: null,
     balance: 1500,
     // 1500 USD * 17.50 = 26250 MDL
@@ -72,6 +78,7 @@ const accounts: AccountDto[] = [
     currency: 'MDL',
     openingDate: '2023-02-01',
     isArchived: true,
+    isPooled: false,
     notes: null,
     balance: 0,
     balanceMdl: 0,
@@ -539,6 +546,7 @@ const accountDetails: Record<string, AccountDetailDto> = {
     currency: 'USD',
     openingDate: '2024-09-10',
     isArchived: false,
+    isPooled: false,
     notes: null,
     balance: 1500,
     balanceMdl: 26250,
@@ -572,6 +580,7 @@ const accountDetails: Record<string, AccountDetailDto> = {
     currency: 'MDL',
     openingDate: '2024-03-01',
     isArchived: false,
+    isPooled: false,
     notes: null,
     balance: 22550,
     balanceMdl: 22550,
@@ -735,6 +744,310 @@ const netWorth: NetWorthDto = {
   netWorthMdl: -7500,
   accountsMissingFxRate: 0,
   loansMissingFxRate: 0,
+  // Zero by default so the "not all of this is yours" sub-line stays absent
+  // for every suite that doesn't care about pools. The tests that do care
+  // override this handler with a positive figure.
+  outsideCapitalMdl: 0,
+};
+
+// Pools seed. Modelled on the worked example in POOLED-CAPITAL.md but with
+// round numbers, so every derived figure below is exact and a test asserting
+// on one can't be defeated by a rounding penny:
+//
+//   pool value 2,500 = account 2,600 − 100 closed-but-unpaid
+//   2,000 shares at 1.25 → owner 400, Andrei 800, Bogdan 800
+//   owner 500 + outside 2,000 = 2,500, so ownerFraction is exactly 0.20
+//   USD→MDL 17.5 (the seeded rate) → 43,750 pool / 35,000 outside / 8,750 yours
+//
+// Two deliberate shapes carried by the roster:
+//   - Bogdan sits exactly ON his capital base, so his `distributable` is 0 —
+//     the "a green month can correctly pay nothing" case, which is the single
+//     most disputable behaviour in the design.
+//   - Andrei carries the closed-but-unpaid payout, so the unpaid badge, the
+//     owed-cash block and the settle flow all have something to render.
+const pools: PoolDto[] = [
+  {
+    id: 'aaaa0001-0000-4000-8000-000000000001',
+    accountId: '66666666-6666-6666-6666-666666666666',
+    accountName: 'Binanance',
+    name: 'Binance pool',
+    currency: 'USD',
+    inceptionDate: '2026-08-01',
+    notes: 'Two friends, monthly profit share.',
+    isArchived: false,
+    accountBalance: 2600,
+    unpaidDistributionCash: 100,
+    unpaidDistributionCount: 1,
+    poolValue: 2500,
+    poolValueMdl: 43750,
+    totalUnits: 2000,
+    navPerUnit: 1.25,
+    participantCount: 3,
+    ownerFraction: 0.2,
+    outsideCapital: 2000,
+    outsideCapitalMdl: 35000,
+    missingFxRate: false,
+  },
+  // Single archived pool so component tests can exercise the "Show archived"
+  // toggle. Only surfaces from the list handler when `includeArchived=true`.
+  // Wound down: no shares left, so `navPerUnit` is null and the row has to
+  // render an em dash rather than a placeholder price.
+  {
+    id: 'aaaa0001-0000-4000-8000-000000000002',
+    accountId: '77777777-7777-7777-7777-777777777777',
+    accountName: 'Old Kraken',
+    name: 'Kraken pool',
+    currency: 'EUR',
+    inceptionDate: '2025-02-01',
+    notes: null,
+    isArchived: true,
+    accountBalance: 0,
+    unpaidDistributionCash: 0,
+    unpaidDistributionCount: 0,
+    poolValue: 0,
+    poolValueMdl: 0,
+    totalUnits: 0,
+    navPerUnit: null,
+    participantCount: 1,
+    ownerFraction: 1,
+    outsideCapital: 0,
+    outsideCapitalMdl: 0,
+    missingFxRate: false,
+  },
+];
+
+const poolDetails: Record<string, PoolDetailDto> = {
+  'aaaa0001-0000-4000-8000-000000000001': {
+    id: 'aaaa0001-0000-4000-8000-000000000001',
+    accountId: '66666666-6666-6666-6666-666666666666',
+    accountName: 'Binanance',
+    accountCurrency: 'USD',
+    accountIsArchived: false,
+    name: 'Binance pool',
+    currency: 'USD',
+    inceptionDate: '2026-08-01',
+    notes: 'Two friends, monthly profit share.',
+    isArchived: false,
+    createdOn: '2026-08-01T09:00:00Z',
+    asOf: '2026-09-03',
+    accountBalance: 2600,
+    unpaidDistributionCash: 100,
+    unpaidDistributionCount: 1,
+    poolValue: 2500,
+    poolValueMdl: 43750,
+    totalUnits: 2000,
+    navPerUnit: 1.25,
+    ownerParticipantId: 'bbbb0001-0000-4000-8000-000000000001',
+    ownerFraction: 0.2,
+    outsideCapital: 2000,
+    outsideCapitalMdl: 35000,
+    missingFxRate: false,
+    // Three days old — inside the week-long grace window, so the staleness
+    // warning stays silent on the default render. Tests that want it push
+    // their own age through a handler override.
+    lastMarkDate: '2026-08-31',
+    markAgeDays: 3,
+    participants: [
+      {
+        id: 'bbbb0001-0000-4000-8000-000000000001',
+        name: 'Me',
+        isOwner: true,
+        isArchived: false,
+        joinedOn: '2026-08-01',
+        units: 400,
+        ownershipPercent: 20,
+        stake: 500,
+        stakeMdl: 8750,
+        capitalBase: 0,
+        distributable: 500,
+        unpaidDistributionCash: 0,
+        unpaidDistributionCount: 0,
+        missingFxRate: false,
+      },
+      {
+        id: 'bbbb0001-0000-4000-8000-000000000002',
+        name: 'Andrei',
+        isOwner: false,
+        isArchived: false,
+        joinedOn: '2026-08-05',
+        units: 800,
+        ownershipPercent: 40,
+        stake: 1000,
+        stakeMdl: 17500,
+        capitalBase: 900,
+        distributable: 100,
+        unpaidDistributionCash: 100,
+        unpaidDistributionCount: 1,
+        missingFxRate: false,
+      },
+      {
+        id: 'bbbb0001-0000-4000-8000-000000000003',
+        name: 'Bogdan',
+        isOwner: false,
+        isArchived: false,
+        joinedOn: '2026-08-10',
+        units: 800,
+        ownershipPercent: 40,
+        stake: 1000,
+        stakeMdl: 17500,
+        capitalBase: 1000,
+        // Exactly at his basis: nothing payable, however green the month was.
+        distributable: 0,
+        unpaidDistributionCash: 0,
+        unpaidDistributionCount: 0,
+        missingFxRate: false,
+      },
+    ],
+    events: [
+      {
+        id: 'cccc0001-0000-4000-8000-000000000004',
+        participantId: 'bbbb0001-0000-4000-8000-000000000002',
+        participantName: 'Andrei',
+        kind: 'Distribution',
+        occurredOn: '2026-08-31',
+        units: 80,
+        unitsDelta: -80,
+        navPerUnit: 1.25,
+        poolValuePreMoney: 2600,
+        cash: 100,
+        cashCurrency: 'USD',
+        settledOn: null,
+        isUnpaid: true,
+        movementTransactionId: null,
+        movementAccountId: null,
+        movementAccountName: null,
+        notes: 'August close',
+      },
+      {
+        id: 'cccc0001-0000-4000-8000-000000000003',
+        participantId: 'bbbb0001-0000-4000-8000-000000000001',
+        participantName: 'Me',
+        kind: 'Redemption',
+        occurredOn: '2026-08-20',
+        units: 100,
+        unitsDelta: -100,
+        navPerUnit: 1.2,
+        poolValuePreMoney: 2520,
+        cash: 120,
+        cashCurrency: 'USD',
+        settledOn: '2026-08-20',
+        isUnpaid: false,
+        movementTransactionId: 'tx-pool-redemption',
+        movementAccountId: '66666666-6666-6666-6666-666666666666',
+        movementAccountName: 'Binanance',
+        notes: null,
+      },
+      {
+        id: 'cccc0001-0000-4000-8000-000000000002',
+        participantId: 'bbbb0001-0000-4000-8000-000000000003',
+        participantName: 'Bogdan',
+        kind: 'Subscription',
+        occurredOn: '2026-08-10',
+        units: 800,
+        unitsDelta: 800,
+        navPerUnit: 1.25,
+        poolValuePreMoney: 1500,
+        cash: 1000,
+        cashCurrency: 'USD',
+        settledOn: '2026-08-10',
+        isUnpaid: false,
+        movementTransactionId: 'tx-pool-subscription',
+        movementAccountId: '66666666-6666-6666-6666-666666666666',
+        movementAccountName: 'Binanance',
+        notes: null,
+      },
+      {
+        id: 'cccc0001-0000-4000-8000-000000000001',
+        participantId: 'bbbb0001-0000-4000-8000-000000000001',
+        participantName: 'Me',
+        kind: 'Seed',
+        occurredOn: '2026-08-01',
+        units: 500,
+        unitsDelta: 500,
+        navPerUnit: 1,
+        poolValuePreMoney: 0,
+        // A seed moves no cash: the owner's existing balance simply becomes
+        // shares, so there is no transaction and no cash leg.
+        cash: null,
+        cashCurrency: null,
+        settledOn: '2026-08-01',
+        isUnpaid: false,
+        movementTransactionId: null,
+        movementAccountId: null,
+        movementAccountName: null,
+        notes: null,
+      },
+    ],
+    reconciliation: {
+      isClean: true,
+      unmatchedTransactions: [],
+      participantUnits: 2000,
+      ledgerUnits: 2000,
+      unitsDrift: 0,
+      unitsBalance: true,
+      valueDrifts: [],
+      unbackedCashClaims: [],
+    },
+  },
+  'aaaa0001-0000-4000-8000-000000000002': {
+    id: 'aaaa0001-0000-4000-8000-000000000002',
+    accountId: '77777777-7777-7777-7777-777777777777',
+    accountName: 'Old Kraken',
+    accountCurrency: 'EUR',
+    accountIsArchived: true,
+    name: 'Kraken pool',
+    currency: 'EUR',
+    inceptionDate: '2025-02-01',
+    notes: null,
+    isArchived: true,
+    createdOn: '2025-02-01T09:00:00Z',
+    asOf: '2026-09-03',
+    accountBalance: 0,
+    unpaidDistributionCash: 0,
+    unpaidDistributionCount: 0,
+    poolValue: 0,
+    poolValueMdl: 0,
+    totalUnits: 0,
+    navPerUnit: null,
+    ownerParticipantId: 'bbbb0002-0000-4000-8000-000000000001',
+    ownerFraction: 1,
+    outsideCapital: 0,
+    outsideCapitalMdl: 0,
+    missingFxRate: false,
+    lastMarkDate: '2026-01-15',
+    markAgeDays: 231,
+    participants: [
+      {
+        id: 'bbbb0002-0000-4000-8000-000000000001',
+        name: 'Me',
+        isOwner: true,
+        isArchived: false,
+        joinedOn: '2025-02-01',
+        units: 0,
+        ownershipPercent: 0,
+        // Wound down: no shares outstanding means no price, so nothing can be
+        // valued — null, never a zero dressed up as a valuation.
+        stake: null,
+        stakeMdl: null,
+        capitalBase: 0,
+        distributable: null,
+        unpaidDistributionCash: 0,
+        unpaidDistributionCount: 0,
+        missingFxRate: false,
+      },
+    ],
+    events: [],
+    reconciliation: {
+      isClean: true,
+      unmatchedTransactions: [],
+      participantUnits: 0,
+      ledgerUnits: 0,
+      unitsDrift: 0,
+      unitsBalance: true,
+      valueDrifts: [],
+      unbackedCashClaims: [],
+    },
+  },
 };
 
 export const handlers = [
@@ -1105,6 +1418,154 @@ export const handlers = [
   http.delete('*/loans/:id/payments/:paymentId', () => new HttpResponse(null, { status: 204 })),
   http.delete('*/loans/:id', () => new HttpResponse(null, { status: 204 })),
   http.post('*/loans/:id/unarchive', () => new HttpResponse(null, { status: 204 })),
+  http.get('*/pools', ({ request }) => {
+    const url = new URL(request.url);
+    const includeArchived = url.searchParams.get('includeArchived') === 'true';
+    const rows = includeArchived ? pools : pools.filter((p) => !p.isArchived);
+    return HttpResponse.json(rows);
+  }),
+  http.get('*/pools/:id', ({ params }) => {
+    const id = String(params.id);
+    const detail = poolDetails[id];
+    if (!detail) {
+      return HttpResponse.json(
+        { error: 'Pool not found', code: 'pools.not_found' },
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(detail);
+  }),
+  http.post('*/pools', async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    if (!body.name || String(body.name).trim().length === 0) {
+      return HttpResponse.json({ error: 'Pool name is required' }, { status: 400 });
+    }
+    if (!body.accountId) {
+      return HttpResponse.json({ error: 'Account is required' }, { status: 400 });
+    }
+    return HttpResponse.json(
+      {
+        id: 'created-pool-id',
+        ownerParticipantId: 'created-owner-participant-id',
+        seedUnits: 1000,
+        markDelta: 0,
+        markTransactionId: null,
+        participants: [
+          {
+            id: 'created-owner-participant-id',
+            name: String(body.ownerName),
+            isOwner: true,
+            units: 1000,
+          },
+        ],
+      },
+      { status: 201 },
+    );
+  }),
+  http.post('*/pools/:id/participants', async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    if (!body.name || String(body.name).trim().length === 0) {
+      return HttpResponse.json({ error: 'Participant name is required' }, { status: 400 });
+    }
+    return HttpResponse.json({ id: 'created-participant-id' }, { status: 201 });
+  }),
+  http.post('*/pools/:id/subscriptions', async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    // Mirrors the server-side rule the UI enforces client-side: no valuation,
+    // no movement.
+    if (!body.poolValueNow || (body.poolValueNow as number) <= 0) {
+      return HttpResponse.json({ error: 'The exchange total is required' }, { status: 400 });
+    }
+    return HttpResponse.json(
+      {
+        eventId: 'created-subscription-event-id',
+        units: 800,
+        navPerUnit: 1.25,
+        poolValuePreMoney: 2500,
+        markDelta: 0,
+        markTransactionId: null,
+        movementTransactionId: 'created-subscription-tx-id',
+      },
+      { status: 201 },
+    );
+  }),
+  http.post('*/pools/:id/redemptions', async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    if (!body.poolValueNow || (body.poolValueNow as number) <= 0) {
+      return HttpResponse.json({ error: 'The exchange total is required' }, { status: 400 });
+    }
+    return HttpResponse.json(
+      {
+        eventId: 'created-redemption-event-id',
+        units: 80,
+        navPerUnit: 1.25,
+        poolValuePreMoney: 2500,
+        markDelta: 0,
+        markTransactionId: null,
+        movementTransactionId: 'created-redemption-tx-id',
+        counterTransactionId: null,
+      },
+      { status: 201 },
+    );
+  }),
+  http.post('*/pools/:id/distributions', async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    if (!body.poolValueNow || (body.poolValueNow as number) <= 0) {
+      return HttpResponse.json({ error: 'The exchange total is required' }, { status: 400 });
+    }
+    return HttpResponse.json(
+      {
+        navPerUnit: 1.25,
+        poolValuePreMoney: 2500,
+        markDelta: 0,
+        markTransactionId: null,
+        totalCash: 100,
+        lines: [
+          {
+            eventId: 'created-distribution-event-id',
+            participantId: 'bbbb0001-0000-4000-8000-000000000002',
+            participantName: 'Andrei',
+            units: 80,
+            cash: 100,
+          },
+        ],
+      },
+      { status: 201 },
+    );
+  }),
+  http.post('*/pools/:id/distributions/:eventId/settle', async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    return HttpResponse.json({
+      transactionId: 'created-settlement-tx-id',
+      settledOn: String(body.settledOn ?? '2026-09-03'),
+      cash: 100,
+    });
+  }),
+  http.post('*/pools/:id/cost-reimbursements', async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    if (body.amount === undefined || (body.amount as number) <= 0) {
+      return HttpResponse.json({ error: 'Amount must be greater than 0' }, { status: 400 });
+    }
+    return HttpResponse.json({
+      navPerUnit: 1.25,
+      totalUnitsTransferred: 16,
+      totalAmountRecovered: 20,
+      markDelta: 0,
+      markTransactionId: null,
+      ownerEventId: 'created-cost-recovery-event-id',
+      lines: [
+        {
+          eventId: 'created-cost-share-event-id',
+          participantId: 'bbbb0001-0000-4000-8000-000000000002',
+          participantName: 'Andrei',
+          units: 8,
+          amount: 10,
+        },
+      ],
+    });
+  }),
+  http.delete('*/pools/:id/events/:eventId', () => new HttpResponse(null, { status: 204 })),
+  http.post('*/pools/:id/archive', () => new HttpResponse(null, { status: 204 })),
   http.get('*/fx-rates', ({ request }) => {
     const url = new URL(request.url);
     const page = Number(url.searchParams.get('page') ?? '1');

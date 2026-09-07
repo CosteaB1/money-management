@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using MoneyManagement.Application.Abstractions.Data;
 using MoneyManagement.Application.Abstractions.Messaging;
+using MoneyManagement.Application.Features.Pools;
 using MoneyManagement.Domain.Accounts;
 using MoneyManagement.Domain.Common;
 using MoneyManagement.Domain.FxRates;
@@ -26,6 +27,22 @@ internal sealed class GetAccountsQueryHandler(IApplicationDbContext db)
         List<Account> accounts = await accountsQuery
             .OrderBy(a => a.Name)
             .ToListAsync(cancellationToken);
+
+        // The "Pooled" badge, in ONE indexed query for the whole page rather
+        // than an EXISTS per row. Produced by PooledAccountGuard so this list
+        // can never disagree with the write guards about which accounts are
+        // pooled - same rule, same place, including its "pooled means a
+        // NON-ARCHIVED pool" reading.
+        //
+        // The badge is ALL a pool changes here. The balance below stays the
+        // account's FULL value, outside capital included, because the account
+        // really does hold that money; only the net-worth surfaces and the
+        // account-detail Performance card take the owner's share. That
+        // divergence was decided explicitly - see AccountDto.
+        HashSet<Guid> pooledAccountIds = await PooledAccountGuard.PooledAsync(
+            db,
+            [.. accounts.Select(a => a.Id)],
+            cancellationToken);
 
         // Single aggregate query so the account list stays O(1) round-trips.
         // The global IsDeleted query filter on Transaction excludes soft-deleted
@@ -88,6 +105,7 @@ internal sealed class GetAccountsQueryHandler(IApplicationDbContext db)
                 account.Balance.Currency,
                 account.OpeningDate,
                 account.IsArchived,
+                pooledAccountIds.Contains(account.Id),
                 account.Notes,
                 balance,
                 balanceMdl));

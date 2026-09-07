@@ -532,6 +532,197 @@ namespace MoneyManagement.Infrastructure.Database.Migrations
                     b.ToTable("loan_payments", (string)null);
                 });
 
+            modelBuilder.Entity("MoneyManagement.Domain.Pools.Pool", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("account_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("currency");
+
+                    b.Property<DateOnly>("InceptionDate")
+                        .HasColumnType("date")
+                        .HasColumnName("inception_date");
+
+                    b.Property<bool>("IsArchived")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_archived");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("notes");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_pools");
+
+                    b.HasIndex("AccountId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_pools_account_id");
+
+                    b.ToTable("pools", (string)null);
+                });
+
+            modelBuilder.Entity("MoneyManagement.Domain.Pools.PoolParticipant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsArchived")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_archived");
+
+                    b.Property<bool>("IsOwner")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_owner");
+
+                    b.Property<DateOnly>("JoinedOn")
+                        .HasColumnType("date")
+                        .HasColumnName("joined_on");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("PoolId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("pool_id");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_pool_participants");
+
+                    b.HasIndex("PoolId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_pool_participants_pool_id_owner")
+                        .HasFilter("\"is_owner\"");
+
+                    b.HasIndex("PoolId", "IsArchived")
+                        .HasDatabaseName("ix_pool_participants_pool_id_is_archived");
+
+                    b.ToTable("pool_participants", (string)null);
+                });
+
+            modelBuilder.Entity("MoneyManagement.Domain.Pools.PoolUnitEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("CashCurrency")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("cash_currency");
+
+                    b.Property<decimal?>("CashValue")
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("cash_value");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasColumnName("kind");
+
+                    b.Property<Guid?>("MovementTransactionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("movement_transaction_id");
+
+                    b.Property<decimal>("NavPerUnit")
+                        .HasColumnType("numeric(28,12)")
+                        .HasColumnName("nav_per_unit");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("notes");
+
+                    b.Property<DateOnly>("OccurredOn")
+                        .HasColumnType("date")
+                        .HasColumnName("occurred_on");
+
+                    b.Property<Guid>("ParticipantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("participant_id");
+
+                    b.Property<Guid>("PoolId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("pool_id");
+
+                    b.Property<decimal>("PoolValuePreMoney")
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("pool_value_pre_money");
+
+                    b.Property<DateOnly?>("SettledOn")
+                        .HasColumnType("date")
+                        .HasColumnName("settled_on");
+
+                    b.Property<decimal>("Units")
+                        .HasColumnType("numeric(28,12)")
+                        .HasColumnName("units");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_pool_unit_events");
+
+                    b.HasIndex("MovementTransactionId")
+                        .HasDatabaseName("ix_pool_unit_events_movement_transaction_id");
+
+                    b.HasIndex("ParticipantId")
+                        .HasDatabaseName("ix_pool_unit_events_participant_id");
+
+                    b.HasIndex("PoolId", "OccurredOn")
+                        .HasDatabaseName("ix_pool_unit_events_pool_id_occurred_on");
+
+                    b.ToTable("pool_unit_events", (string)null);
+                });
+
             modelBuilder.Entity("MoneyManagement.Domain.SavingsGoals.SavingsGoal", b =>
                 {
                     b.Property<Guid>("Id")
@@ -805,6 +996,49 @@ namespace MoneyManagement.Infrastructure.Database.Migrations
                         .HasForeignKey("TransactionId")
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("fk_loan_payments_transactions_transaction_id");
+                });
+
+            modelBuilder.Entity("MoneyManagement.Domain.Pools.Pool", b =>
+                {
+                    b.HasOne("MoneyManagement.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_pools_accounts_account_id");
+                });
+
+            modelBuilder.Entity("MoneyManagement.Domain.Pools.PoolParticipant", b =>
+                {
+                    b.HasOne("MoneyManagement.Domain.Pools.Pool", null)
+                        .WithMany()
+                        .HasForeignKey("PoolId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_pool_participants_pools_pool_id");
+                });
+
+            modelBuilder.Entity("MoneyManagement.Domain.Pools.PoolUnitEvent", b =>
+                {
+                    b.HasOne("MoneyManagement.Domain.Transactions.Transaction", null)
+                        .WithMany()
+                        .HasForeignKey("MovementTransactionId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_pool_unit_events_transactions_movement_transaction_id");
+
+                    b.HasOne("MoneyManagement.Domain.Pools.PoolParticipant", null)
+                        .WithMany()
+                        .HasForeignKey("ParticipantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_pool_unit_events_pool_participants_participant_id");
+
+                    b.HasOne("MoneyManagement.Domain.Pools.Pool", null)
+                        .WithMany()
+                        .HasForeignKey("PoolId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_pool_unit_events_pools_pool_id");
                 });
 
             modelBuilder.Entity("MoneyManagement.Domain.SavingsGoals.SavingsGoal", b =>

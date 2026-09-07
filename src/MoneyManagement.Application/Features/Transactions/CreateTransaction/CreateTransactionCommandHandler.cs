@@ -2,9 +2,11 @@ using Microsoft.EntityFrameworkCore;
 using MoneyManagement.Application.Abstractions.Data;
 using MoneyManagement.Application.Abstractions.FxRates;
 using MoneyManagement.Application.Abstractions.Messaging;
+using MoneyManagement.Application.Features.Pools;
 using MoneyManagement.Domain.Accounts;
 using MoneyManagement.Domain.Categories;
 using MoneyManagement.Domain.Common;
+using MoneyManagement.Domain.Pools;
 using MoneyManagement.Domain.Transactions;
 using MoneyManagement.SharedKernel;
 
@@ -23,6 +25,16 @@ internal sealed class CreateTransactionCommandHandler(
         if (account is null)
         {
             return Result.Failure<Guid>(AccountErrors.NotFound(command.AccountId));
+        }
+
+        // Every row this handler writes is Source.Manual, so a pooled account
+        // blocks the whole path: a hand-entered income or expense moves value
+        // with no unit event, and net worth then shares that value pro-rata with
+        // the outside investors. The pool's own commands build their rows via
+        // PoolMoneyLeg and never come through here.
+        if (await PooledAccountGuard.IsPooledAsync(db, command.AccountId, cancellationToken))
+        {
+            return Result.Failure<Guid>(PoolErrors.ManualMovementBlocked);
         }
 
         if (command.CategoryId is { } categoryId)

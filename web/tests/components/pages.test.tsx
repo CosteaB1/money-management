@@ -56,6 +56,8 @@ import GoalsPage from '@/app/goals/page';
 import LoanDetailPage from '@/app/loans/[id]/page';
 import LoansPage from '@/app/loans/page';
 import DashboardPage from '@/app/page';
+import PoolDetailPage from '@/app/pools/[id]/page';
+import PoolsPage from '@/app/pools/page';
 import ReportsPage from '@/app/reports/page';
 import CategoriesSettingsPage from '@/app/settings/categories/page';
 import DataSettingsPage from '@/app/settings/data/page';
@@ -134,6 +136,15 @@ describe('App pages', () => {
     expect(screen.getByTestId('loans-summary')).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByText('Parents')).toBeInTheDocument();
+    });
+  });
+
+  it('Pools page renders header + summary tiles + table', async () => {
+    renderWithClient(<PoolsPage />);
+    expect(screen.getByRole('heading', { name: 'Pools' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('pools-summary')).toBeInTheDocument();
+      expect(screen.getByTestId('pools-table')).toBeInTheDocument();
     });
   });
 
@@ -234,6 +245,16 @@ describe('App pages', () => {
     renderWithClient(ui);
     await waitFor(() => {
       expect(screen.getByTestId('loan-detail-counterparty')).toHaveTextContent('Parents');
+    });
+  });
+
+  it('Pool detail page (async server component) resolves params and renders the view', async () => {
+    const ui = await PoolDetailPage({
+      params: Promise.resolve({ id: 'aaaa0001-0000-4000-8000-000000000001' }),
+    });
+    renderWithClient(ui);
+    await waitFor(() => {
+      expect(screen.getByTestId('pool-detail-name')).toHaveTextContent('Binance pool');
     });
   });
 });

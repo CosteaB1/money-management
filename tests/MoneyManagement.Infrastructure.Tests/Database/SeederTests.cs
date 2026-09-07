@@ -92,6 +92,31 @@ public sealed class SeederTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CategorySeeder_SeedsEveryDeterministicIdTheApplicationLayerReferences()
+    {
+        // Every id on SeededCategories is used as a Transaction.CategoryId by
+        // some write path (adjustments, investments, withdrawals, loans, pools).
+        // A member added there but forgotten in CategorySeeder.Defaults is not a
+        // cosmetic gap: the FK on transactions.category_id makes that write path
+        // throw at SaveChanges, in production, on the first use.
+        System.Reflection.FieldInfo[] fields = typeof(SeededCategories)
+            .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+
+        Guid[] ids = [.. fields.Where(f => f.FieldType == typeof(Guid)).Select(f => (Guid)f.GetValue(null)!)];
+
+        ids.Should().NotBeEmpty("SeededCategories should expose deterministic ids");
+        ids.Should().OnlyHaveUniqueItems();
+
+        List<Guid> present = await _context.Categories
+            .AsNoTracking()
+            .Where(c => ids.Contains(c.Id))
+            .Select(c => c.Id)
+            .ToListAsync();
+
+        present.Should().BeEquivalentTo(ids);
+    }
+
+    [Fact]
     public async Task CategoryPatternSeeder_ReinsertsMissingPattern()
     {
         const string keyword = "LINELLA";

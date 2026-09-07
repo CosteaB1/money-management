@@ -94,6 +94,33 @@ public class ImportDataCommandHandlerTests
         await store.DidNotReceive().RestoreAsync(Arg.Any<BackupDocument>(), Arg.Any<CancellationToken>());
     }
 
+    [Theory]
+    [InlineData("pools")]
+    [InlineData("poolParticipants")]
+    [InlineData("poolUnitEvents")]
+    public async Task Handle_NullPoolArray_FailsWithMalformedBackup(string missingTable)
+    {
+        IBackupStore store = Substitute.For<IBackupStore>();
+        var handler = new ImportDataCommandHandler(store);
+
+        // The pool tables are backed up since schema v6; a doc missing any of
+        // the three arrays is malformed and must not reach the destructive
+        // restore.
+        BackupDocument document = missingTable switch
+        {
+            "pools" => ValidDocument() with { Pools = null! },
+            "poolParticipants" => ValidDocument() with { PoolParticipants = null! },
+            _ => ValidDocument() with { PoolUnitEvents = null! },
+        };
+
+        Result<ImportDataResult> result = await handler.Handle(
+            new ImportDataCommand(document), CancellationToken.None);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("data.malformed_backup");
+        await store.DidNotReceive().RestoreAsync(Arg.Any<BackupDocument>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task Handle_ValidDocument_CallsRestoreOnceAndReturnsCounts()
     {
@@ -108,7 +135,10 @@ public class ImportDataCommandHandlerTests
             SavingsGoals: 1,
             SavingsGoalContributions: 7,
             Loans: 2,
-            LoanPayments: 4);
+            LoanPayments: 4,
+            Pools: 1,
+            PoolParticipants: 3,
+            PoolUnitEvents: 11);
 
         IBackupStore store = Substitute.For<IBackupStore>();
         store.RestoreAsync(Arg.Any<BackupDocument>(), Arg.Any<CancellationToken>()).Returns(counts);
@@ -138,5 +168,8 @@ public class ImportDataCommandHandlerTests
         SavingsGoals: [],
         SavingsGoalContributions: [],
         Loans: [],
-        LoanPayments: []);
+        LoanPayments: [],
+        Pools: [],
+        PoolParticipants: [],
+        PoolUnitEvents: []);
 }

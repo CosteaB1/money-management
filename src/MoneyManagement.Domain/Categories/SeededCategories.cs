@@ -49,4 +49,20 @@ public static class SeededCategories
     /// direction depending on who lent to whom.
     /// </summary>
     public static readonly Guid LoanId = new("00000000-0000-0000-0000-000000000012");
+
+    /// <summary>
+    /// "Pool" - applied to the transactions synthesized by the Pools slice
+    /// (subscriptions, redemptions and distribution payouts recorded against the
+    /// pooled account). Those rows are transfer-flagged so they stay out of
+    /// income/expense aggregates - same precedent as Investment/Withdrawal and
+    /// Loan. Flow is <see cref="CategoryFlow.Both"/> because capital moves both
+    /// ways (money in from an investor, money out as a payout or exit).
+    /// <para>
+    /// The pool's re-pricing MARK is deliberately NOT categorised here: it is a
+    /// real <c>IsAdjustment</c> row and keeps
+    /// <see cref="BalanceAdjustmentId"/>, so the account-detail "Net P&amp;L"
+    /// bucket keeps counting it exactly as a hand-typed snapshot.
+    /// </para>
+    /// </summary>
+    public static readonly Guid PoolId = new("00000000-0000-0000-0000-000000000013");
 }

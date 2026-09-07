@@ -29,5 +29,5 @@ public static class AccountErrors
     public static Error HasLinkedRecords(Guid id) =>
         Error.Conflict(
             "account.has_linked_records",
-            $"Account with id '{id}' has linked transactions, imports, or goals and can't be permanently deleted. Archive it instead.");
+            $"Account with id '{id}' has linked transactions, imports, goals, or a capital pool and can't be permanently deleted. Archive it instead.");
 }

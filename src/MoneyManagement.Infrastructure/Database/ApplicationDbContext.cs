@@ -7,6 +7,7 @@ using MoneyManagement.Domain.Categories;
 using MoneyManagement.Domain.FxRates;
 using MoneyManagement.Domain.Imports;
 using MoneyManagement.Domain.Loans;
+using MoneyManagement.Domain.Pools;
 using MoneyManagement.Domain.SavingsGoals;
 using MoneyManagement.Domain.Transactions;
 using MoneyManagement.SharedKernel;
@@ -29,6 +30,9 @@ public sealed class ApplicationDbContext(
     public DbSet<SavingsGoalContribution> SavingsGoalContributions => Set<SavingsGoalContribution>();
     public DbSet<Loan> Loans => Set<Loan>();
     public DbSet<LoanPayment> LoanPayments => Set<LoanPayment>();
+    public DbSet<Pool> Pools => Set<Pool>();
+    public DbSet<PoolParticipant> PoolParticipants => Set<PoolParticipant>();
+    public DbSet<PoolUnitEvent> PoolUnitEvents => Set<PoolUnitEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

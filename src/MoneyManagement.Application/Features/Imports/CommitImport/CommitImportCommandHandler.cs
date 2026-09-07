@@ -2,10 +2,12 @@ using Microsoft.EntityFrameworkCore;
 using MoneyManagement.Application.Abstractions.Data;
 using MoneyManagement.Application.Abstractions.FxRates;
 using MoneyManagement.Application.Abstractions.Messaging;
+using MoneyManagement.Application.Features.Pools;
 using MoneyManagement.Domain.Accounts;
 using MoneyManagement.Domain.Categories;
 using MoneyManagement.Domain.Common;
 using MoneyManagement.Domain.Imports;
+using MoneyManagement.Domain.Pools;
 using MoneyManagement.Domain.Transactions;
 using MoneyManagement.SharedKernel;
 
@@ -45,6 +47,21 @@ internal sealed class CommitImportCommandHandler(
             .Where(t => t.IsTransfer && t.CounterAccountId is not null)
             .Select(t => t.CounterAccountId!.Value)
             .Distinct()];
+
+        // LIVE PATH, not a hypothetical: the 2026-08-25 -300 P2P row on the real
+        // Binance account is source=Imported. An imported row on a pooled account
+        // moves value with no unit event, so net worth would share it pro-rata
+        // with the outside investors. Target account and every counter account
+        // are checked in ONE query.
+        HashSet<Guid> pooled = await PooledAccountGuard.PooledAsync(
+            db,
+            [command.AccountId, .. counterAccountIds],
+            cancellationToken);
+
+        if (pooled.Count > 0)
+        {
+            return Result.Failure<CommitResultDto>(PoolErrors.ImportBlocked);
+        }
 
         Dictionary<Guid, Account> counterAccounts = new();
         if (counterAccountIds.Length > 0)

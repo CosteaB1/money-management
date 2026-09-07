@@ -2,9 +2,11 @@ using Microsoft.EntityFrameworkCore;
 using MoneyManagement.Application.Abstractions.Data;
 using MoneyManagement.Application.Abstractions.FxRates;
 using MoneyManagement.Application.Abstractions.Messaging;
+using MoneyManagement.Application.Features.Pools;
 using MoneyManagement.Domain.Accounts;
 using MoneyManagement.Domain.Categories;
 using MoneyManagement.Domain.Common;
+using MoneyManagement.Domain.Pools;
 using MoneyManagement.Domain.Transactions;
 using MoneyManagement.SharedKernel;
 
@@ -39,6 +41,21 @@ internal sealed class CreateTransferCommandHandler(
         {
             return Result.Failure<TransferResult>(
                 TransferErrors.DestinationAccountNotFound(command.DestinationAccountId));
+        }
+
+        // Either leg touching a pooled account is refused: the cash has to move
+        // together with units or net worth silently shares it pro-rata with the
+        // outside investors. One query covers both ids, so no N+1. The pool's own
+        // redemption command writes its two reciprocal legs inline and bypasses
+        // this handler entirely - that is the sanctioned way to move money out.
+        HashSet<Guid> pooled = await PooledAccountGuard.PooledAsync(
+            db,
+            [command.SourceAccountId, command.DestinationAccountId],
+            cancellationToken);
+
+        if (pooled.Count > 0)
+        {
+            return Result.Failure<TransferResult>(PoolErrors.TransferBlocked);
         }
 
         bool crossCurrency = !string.Equals(

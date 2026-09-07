@@ -2,8 +2,10 @@ using Microsoft.EntityFrameworkCore;
 using MoneyManagement.Application.Abstractions.Data;
 using MoneyManagement.Application.Abstractions.FxRates;
 using MoneyManagement.Application.Abstractions.Messaging;
+using MoneyManagement.Application.Features.Pools;
 using MoneyManagement.Domain.Common;
 using MoneyManagement.Domain.Loans;
+using MoneyManagement.Domain.Pools;
 using MoneyManagement.Domain.Transactions;
 using MoneyManagement.SharedKernel;
 
@@ -38,6 +40,25 @@ internal sealed class DeleteLoanPaymentCommandHandler(
 
             if (transaction is not null)
             {
+                // This handler soft-deletes the row INLINE, so
+                // DeleteTransaction's pooled guard never runs on it - the same
+                // test has to be applied here or the loans slice becomes the
+                // back door to it. Removing a row dated at or before a priced
+                // unit event restates the balance every NAV since was struck
+                // from, re-pricing units already issued to a third party. The
+                // whole command fails: dropping the payment while leaving its
+                // transaction (or vice versa) would desynchronise the loan from
+                // the account.
+                if (await PooledAccountGuard.DeleteRepricesUnitsAsync(
+                        db,
+                        transaction.AccountId,
+                        transaction.Id,
+                        transaction.TransactionDate,
+                        cancellationToken))
+                {
+                    return Result.Failure(PoolErrors.DeleteRepricesUnits);
+                }
+
                 // FX-convert at the row's own date so downstream event
                 // consumers see the same MDL value the create path booked —
                 // mirrors DeleteTransactionCommandHandler.

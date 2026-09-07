@@ -121,7 +121,7 @@ public sealed class GetNetWorthQueryHandlerTests
     /// exercised together with the arithmetic, the way the endpoint runs them.
     /// </summary>
     private static GetNetWorthQueryHandler Handler(IApplicationDbContext db, IFxConverter? fx = null) =>
-        new(db, fx ?? FakeFxConverter.Identity(), new LoanExternalClaimSource(db), Clock());
+        new(db, fx ?? FakeFxConverter.Identity(), new LoanExternalClaimSource(db), [], Clock());
 
     [Fact]
     public async Task Handle_NoAccountsNoLoans_ReturnsAllZeroes()
@@ -131,7 +131,7 @@ public sealed class GetNetWorthQueryHandlerTests
         Result<NetWorthDto> result = await Handler(db).Handle(new GetNetWorthQuery(), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
-        result.Value.Should().Be(new NetWorthDto(0m, 0m, 0m, 0m, 0, 0));
+        result.Value.Should().Be(new NetWorthDto(0m, 0m, 0m, 0m, 0, 0, 0m));
     }
 
     [Fact]
@@ -362,6 +362,7 @@ public sealed class GetNetWorthQueryHandlerTests
                 Today.AddDays(1),
                 ExternalClaimSide.ReducesNetWorth,
                 [])),
+            [],
             Clock());
 
         Result<NetWorthDto> result = await handler.Handle(new GetNetWorthQuery(), CancellationToken.None);

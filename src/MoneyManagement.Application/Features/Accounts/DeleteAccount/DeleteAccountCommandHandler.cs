@@ -9,8 +9,9 @@ namespace MoneyManagement.Application.Features.Accounts.DeleteAccount;
 /// <summary>
 /// Permanently removes an account row. Unlike archiving, this is a hard delete
 /// and only succeeds when the account has no linked records. Any linked
-/// transaction (as the primary or counter account), import batch, or savings
-/// goal blocks the delete with a 409 Conflict so the user archives instead.
+/// transaction (as the primary or counter account), import batch, savings goal
+/// or capital pool blocks the delete with a 409 Conflict so the user archives
+/// instead.
 /// </summary>
 internal sealed class DeleteAccountCommandHandler(IApplicationDbContext db)
     : ICommandHandler<DeleteAccountCommand>
@@ -43,7 +44,18 @@ internal sealed class DeleteAccountCommandHandler(IApplicationDbContext db)
             .IgnoreQueryFilters()
             .AnyAsync(g => g.LinkedAccountId == command.Id, cancellationToken);
 
-        if (hasTransactions || hasImports || hasGoals)
+        // pools.account_id is ON DELETE RESTRICT too, and a pool can exist with
+        // NO transactions at all: a zero-delta inception mark writes no row and
+        // the seed carries no cash leg by design. Without this pre-check such an
+        // account sails past the three checks above and dies on
+        // fk_pools_accounts_account_id as an unhandled 500 with no errorCode,
+        // where the user needed "this account holds a pool, archive it instead".
+        // IgnoreQueryFilters: an archived pool still holds the FK.
+        bool hasPool = await db.Pools
+            .IgnoreQueryFilters()
+            .AnyAsync(p => p.AccountId == command.Id, cancellationToken);
+
+        if (hasTransactions || hasImports || hasGoals || hasPool)
         {
             return Result.Failure(AccountErrors.HasLinkedRecords(command.Id));
         }

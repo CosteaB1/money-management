@@ -88,6 +88,15 @@ app/                             # Next.js app dir is at web/app/, not web/src/a
   goals/[id]/page.tsx            # built: per-goal detail (Server-Component shell rendering
                                  # GoalDetailView — header strip, Progress card, Pace card,
                                  # History chart, Contributions table, skeleton + 404 paths)
+  pools/page.tsx                 # built: Pools tab — summary tiles (your share / outside capital /
+                                 # pool value / unpaid payouts) + pools-table + "Show archived"
+                                 # switch (accounts-page pattern) + create-pool dialog
+  pools/[id]/page.tsx            # built: per-pool detail — value card (pool value, NAV, account
+                                 # balance and unpaid-payout split), mark-staleness warning,
+                                 # participants table (shares as PERCENTAGES, never unit counts),
+                                 # event ledger (the one place units appear), reconciliation panel,
+                                 # and every money-moving dialog (they need the roster, which only
+                                 # the detail endpoint returns — the list row menu is Open + Archive)
   loans/page.tsx                 # built: Loans tab — "Owed to me" / "I owe" summary tiles (MDL,
                                  # net-worth-card-style missing-FX warning) + loans table +
                                  # Add-loan / Record-payment / Edit / Archive dialogs
@@ -246,6 +255,14 @@ src/
                                  # (Date/signed Amount/Source badge — "Manual" vs "From <linked
                                  # account>"/Notes), goal-detail-skeleton + goal-detail-error
                                  # (404 surfaces a distinct "Goal not found." from generic)
+    pools/                       # pools-summary, pools-table, pool-value-now-field (the shared
+                                 # "type Binance's real total right now" input), 9 dialogs
+                                 # (create-pool w/ back-dated-subscription repeater, add-participant,
+                                 # record-subscription, record-redemption, close-month, settle-payout,
+                                 # record-cost-reimbursement, archive-pool, delete-event) and
+                                 # detail/ (pool-detail-view + header/skeleton/error,
+                                 # pool-value-card, mark-staleness-warning, pool-participants-table,
+                                 # pool-events-table, pool-reconciliation-panel)
     loans/                       # loans-table (built: counterparty cell links to /loans/[id],
                                  # Borrowed [Received] / Lent [Given] direction badge, principal,
                                  # repaid, outstanding w/ muted MDL-eq sub-line + missing-FX icon,
@@ -617,6 +634,73 @@ Per the project-root [CLAUDE.md](./CLAUDE.md):
 When a change spans both stacks, dispatch both agents in parallel from the main thread and collate their reports.
 
 ---
+
+## Pools UI
+
+The pool screens are the one place in the app where the numbers on screen are **not all the user's
+money**, so several conventions exist only here.
+
+- **Vocabulary: "share" and percentages, never "units".** The unit model is what makes the arithmetic
+  exact, but "units" is alien vocabulary for a personal-finance app. `formatUnits` / `formatNav` are
+  used in exactly two places — the **event ledger** (an audit trail, where unit counts are the point)
+  and the unit-drift row of the reconciliation panel. A test asserts the participants table contains
+  no unit counts at all.
+- **"Your share" is derived by subtraction** (`poolValue − outsideCapital`), not by
+  `poolValue × ownerFraction`. The two are equal in principle, but per-participant stakes are rounded
+  independently, so multiplying would let the design's deliberate one-cent residual appear between two
+  figures printed side by side. The summary percentage is MDL-weighted across pools, and renders `—`
+  rather than a fabricated 0% when nothing is convertible.
+- **Every money-moving dialog hard-blocks on `poolValueNow`** — Binance's real total, typed at the
+  moment money crosses the boundary, "across spot/futures/earn/fiat, **including BNB**". The client
+  refuses to issue the request without it. `pool-value-now-field.tsx` is the single shared input so
+  the wording and the rule cannot drift between dialogs. The one exception is **cost reimbursement**,
+  where no cash crosses the boundary and the backend validator has the field nullable — it is
+  labelled optional-but-recommended, and supplying it re-marks the pool first.
+- **Close and Settle are visibly two steps.** The close dialog says in as many words that it marks the
+  month and records what is owed but **moves no money**; settling is a separate action on the ledger
+  row, taken the day the transfer actually lands.
+- **The close dialog's preview is computed client-side; the server stays the authority on amounts.**
+  `previewPoolValuation` (`src/lib/utils/pool.ts`) mirrors `PoolUnitRegister.SnapshotAsOf` —
+  `poolValue = typed total − unpaidDistributionCash`, NAV guarded on both the dust tolerance and
+  positivity, capital base floored where consumed, owner excluded — and reprices every row on each
+  keystroke. This is not duplication for its own sake: the dialog previously gated on the server's
+  `distributable`, which is priced against the *previous* mark, so after any close (which sweeps every
+  stake back to basis) the button stayed disabled and **no payout could ever be made from the UI**.
+  The request body still sends only the participant selection; expect the preview and the server to
+  differ by a cent, and the copy says so.
+- **The close dialog chooses *who* gets paid, never *how much*.** The `distributable` figures on
+  screen were priced against the *previous* mark and go stale the instant a new total is typed, and a
+  `cash` above someone's freshly-recomputed distributable is a hard 409. So the UI sends the
+  participant selection and lets the server compute the amounts. **Consequence: partial payouts are
+  not expressible from the UI** — which is fine, because "reinvest this month" is simply leaving a
+  participant unchecked.
+- **A losing month is not closed here.** `POST /pools/{id}/distributions` fails with
+  `pools.distribution_nothing_to_pay` before saving when nothing is payable, so the dialog detects
+  that state up front and points at **Update balance** on the account instead (an Adjustment dated
+  today is explicitly still permitted on a pooled account). The friends' stakes fall pro-rata with the
+  mark, which is the intended behaviour.
+- **A zero `distributable` is spelled out, not left as "0.00"** — "nothing payable, still at or below
+  their capital base". A green month paying zero is the single most disputable behaviour in the whole
+  arrangement, so the UI explains it rather than printing a bare number. The **owner's** distributable
+  is rendered as "Stays in the pool" rather than an amount, because the owner's seed carries no cash
+  basis and the raw figure would read as an offer.
+- **The reconciliation panel renders only when something is wrong**, across all four finding classes
+  (unaccounted transactions, unit drift, value drifts, unbacked cash claims). A permanently-green
+  panel is noise, and noise gets ignored. The trade-off is that a clean pool gives no positive
+  confirmation the tripwire ran.
+- **Mark staleness** warns amber past 7 days and red past 30 (`MARK_STALE_DAYS` / `MARK_CRITICAL_DAYS`,
+  exported constants). The banner is a nudge, not the safety mechanism — the actual protection is that
+  every capital event hard-blocks on a freshly typed total.
+- **Pooled accounts elsewhere**: `/accounts` rows and the account-detail header carry a **"Pooled"
+  badge** from `AccountDto.isPooled`, and the account keeps showing its **full** balance by explicit
+  decision. The **Performance card on that page is owner-only**, and says so — otherwise it would book
+  the friends' capital as the user's contributions and their payouts as the user's withdrawals.
+- **Archiving a pool is one-way** — there is no unarchive route, because archiving already requires
+  zero outside units.
+
+**Known gap:** `unpaidDistributionCash` has no MDL equivalent on `PoolDto`, so the "Unpaid payouts"
+tile can only total across pools that share a currency; otherwise it renders "Multiple currencies".
+Adding `PoolDto.UnpaidDistributionCashMdl` would close it.
 
 ## Account Model UI summary
 

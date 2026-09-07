@@ -2,7 +2,9 @@ using Microsoft.EntityFrameworkCore;
 using MoneyManagement.Application.Abstractions.Data;
 using MoneyManagement.Application.Abstractions.FxRates;
 using MoneyManagement.Application.Abstractions.Messaging;
+using MoneyManagement.Application.Features.Pools;
 using MoneyManagement.Domain.Common;
+using MoneyManagement.Domain.Pools;
 using MoneyManagement.Domain.Transactions;
 using MoneyManagement.SharedKernel;
 
@@ -20,6 +22,20 @@ internal sealed class DeleteTransactionCommandHandler(
         if (transaction is null)
         {
             return Result.Failure(TransactionErrors.NotFound(command.Id));
+        }
+
+        // Refuses to delete a row that units have already been priced against.
+        // The rule itself lives in PooledAccountGuard because this handler is
+        // not the only path that soft-deletes a transaction - DeleteLoanPayment
+        // does it inline and has to apply exactly the same test.
+        if (await PooledAccountGuard.DeleteRepricesUnitsAsync(
+                db,
+                transaction.AccountId,
+                transaction.Id,
+                transaction.TransactionDate,
+                cancellationToken))
+        {
+            return Result.Failure(PoolErrors.DeleteRepricesUnits);
         }
 
         // FX-convert at the row's own date so the inverse budget update sees

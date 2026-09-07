@@ -15,4 +15,7 @@ public sealed record ImportDataResult(
     int SavingsGoals,
     int SavingsGoalContributions,
     int Loans,
-    int LoanPayments);
+    int LoanPayments,
+    int Pools,
+    int PoolParticipants,
+    int PoolUnitEvents);

@@ -11,6 +11,7 @@ const baseAccount: AccountDetailDto = {
   currency: 'USD',
   openingDate: '2024-09-10',
   isArchived: false,
+  isPooled: false,
   notes: null,
   balance: 1500,
   balanceMdl: 26250,

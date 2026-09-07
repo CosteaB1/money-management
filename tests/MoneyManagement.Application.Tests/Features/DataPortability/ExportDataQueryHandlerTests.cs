@@ -56,5 +56,8 @@ public class ExportDataQueryHandlerTests
         SavingsGoals: [],
         SavingsGoalContributions: [],
         Loans: [],
-        LoanPayments: []);
+        LoanPayments: [],
+        Pools: [],
+        PoolParticipants: [],
+        PoolUnitEvents: []);
 }

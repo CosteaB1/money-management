@@ -7,6 +7,7 @@ using MoneyManagement.Domain.Categories;
 using MoneyManagement.Domain.Common;
 using MoneyManagement.Domain.Transactions;
 using MoneyManagement.SharedKernel;
+using NSubstitute;
 
 namespace MoneyManagement.Application.Tests.Features.Transactions;
 
@@ -14,6 +15,17 @@ public class AdjustBalanceCommandHandlerTests
 {
     private static readonly DateOnly OpeningDate = new(2026, 1, 1);
     private static readonly DateOnly AdjustmentDate = new(2026, 4, 30);
+
+    /// <summary>
+    /// Pinned to <see cref="AdjustmentDate"/> so the pooled-account
+    /// "mark must be today" guard has a deterministic notion of today.
+    /// </summary>
+    private static IDateTimeProvider FixedClock()
+    {
+        IDateTimeProvider clock = Substitute.For<IDateTimeProvider>();
+        clock.UtcNow.Returns(AdjustmentDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
+        return clock;
+    }
 
     private static Account NewAccount(
         AccountType type = AccountType.Brokerage,
@@ -38,7 +50,7 @@ public class AdjustBalanceCommandHandlerTests
         Account account = NewAccount(type: AccountType.Brokerage, opening: 1_000m);
         IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [account]);
 
-        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity());
+        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity(), FixedClock());
         var command = new AdjustBalanceCommand(account.Id, BalanceChangeKind.Adjustment, Value: 1_250m, AdjustmentDate, Notes: "Quarterly mark");
 
         Result<AdjustBalanceResult> result = await handler.Handle(command, CancellationToken.None);
@@ -68,7 +80,7 @@ public class AdjustBalanceCommandHandlerTests
         Account account = NewAccount(type: AccountType.CryptoExchange, opening: 5_000m, currency: "USD", name: "Binance");
         IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [account]);
 
-        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity());
+        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity(), FixedClock());
         var command = new AdjustBalanceCommand(account.Id, BalanceChangeKind.Adjustment, Value: 4_200m, AdjustmentDate, Notes: null);
 
         Result<AdjustBalanceResult> result = await handler.Handle(command, CancellationToken.None);
@@ -100,7 +112,7 @@ public class AdjustBalanceCommandHandlerTests
             accounts: [account],
             transactions: [priorInterest]);
 
-        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity());
+        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity(), FixedClock());
         // Current balance = 1000 + 50 = 1050. Target = 1100 => delta = 50.
         var command = new AdjustBalanceCommand(account.Id, BalanceChangeKind.Adjustment, Value: 1_100m, AdjustmentDate, Notes: null);
 
@@ -115,7 +127,7 @@ public class AdjustBalanceCommandHandlerTests
     {
         IApplicationDbContext db = FakeApplicationDbContext.Create();
 
-        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity());
+        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity(), FixedClock());
         var missingId = Guid.CreateVersion7();
         var command = new AdjustBalanceCommand(missingId, BalanceChangeKind.Adjustment, Value: 100m, AdjustmentDate, Notes: null);
 
@@ -140,7 +152,7 @@ public class AdjustBalanceCommandHandlerTests
         Account account = NewAccount(type: type, currency: "MDL", opening: 0m);
         IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [account]);
 
-        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity());
+        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity(), FixedClock());
         var command = new AdjustBalanceCommand(account.Id, kind, Value: 500m, AdjustmentDate, Notes: null);
 
         Result<AdjustBalanceResult> result = await handler.Handle(command, CancellationToken.None);
@@ -158,7 +170,7 @@ public class AdjustBalanceCommandHandlerTests
         Account account = NewAccount(type: AccountType.Brokerage, opening: 1_000m);
         IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [account]);
 
-        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity());
+        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity(), FixedClock());
         var command = new AdjustBalanceCommand(
             account.Id, (BalanceChangeKind)999, Value: 100m, AdjustmentDate, Notes: null);
 
@@ -178,7 +190,7 @@ public class AdjustBalanceCommandHandlerTests
         Account account = NewAccount(type: AccountType.Brokerage, opening: 1_000m);
         IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [account]);
 
-        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity());
+        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity(), FixedClock());
         var command = new AdjustBalanceCommand(
             account.Id, BalanceChangeKind.Investment, Value: 0m, AdjustmentDate, Notes: null);
 
@@ -195,7 +207,7 @@ public class AdjustBalanceCommandHandlerTests
         Account account = NewAccount(type: AccountType.BankDeposit, opening: 10_000m, currency: "MDL");
         IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [account]);
 
-        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity());
+        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity(), FixedClock());
         var command = new AdjustBalanceCommand(account.Id, BalanceChangeKind.Adjustment, Value: 10_000m, AdjustmentDate, Notes: null);
 
         Result<AdjustBalanceResult> result = await handler.Handle(command, CancellationToken.None);
@@ -229,7 +241,7 @@ public class AdjustBalanceCommandHandlerTests
             accounts: [account],
             transactions: [bankFee]);
 
-        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity());
+        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity(), FixedClock());
         // Fee-inclusive current balance = 1000 - 25 = 975.
         // Target = 1100 => delta = 125.
         var command = new AdjustBalanceCommand(account.Id, BalanceChangeKind.Adjustment, Value: 1_100m, AdjustmentDate, Notes: null);
@@ -246,7 +258,7 @@ public class AdjustBalanceCommandHandlerTests
         Account account = NewAccount(type: AccountType.Brokerage, opening: 1_000m, currency: "USD");
         IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [account]);
 
-        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity());
+        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity(), FixedClock());
         var command = new AdjustBalanceCommand(
             account.Id,
             BalanceChangeKind.Investment,
@@ -278,7 +290,7 @@ public class AdjustBalanceCommandHandlerTests
         Account account = NewAccount(type: AccountType.CryptoExchange, opening: 0m, currency: "USD");
         IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [account]);
 
-        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity());
+        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity(), FixedClock());
         var command = new AdjustBalanceCommand(
             account.Id,
             BalanceChangeKind.Investment,
@@ -301,7 +313,7 @@ public class AdjustBalanceCommandHandlerTests
         Account account = NewAccount(type: AccountType.P2PLending, opening: 1_000m, currency: "MDL");
         IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [account]);
 
-        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity());
+        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity(), FixedClock());
         var command = new AdjustBalanceCommand(
             account.Id,
             BalanceChangeKind.Withdrawal,
@@ -346,7 +358,7 @@ public class AdjustBalanceCommandHandlerTests
             accounts: [account],
             transactions: [priorInterest]);
 
-        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity());
+        var handler = new AdjustBalanceCommandHandler(db, FakeFxConverter.Identity(), FixedClock());
         var command = new AdjustBalanceCommand(
             account.Id,
             BalanceChangeKind.Withdrawal,

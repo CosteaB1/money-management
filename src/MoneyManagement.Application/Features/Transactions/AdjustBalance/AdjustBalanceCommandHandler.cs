@@ -1,11 +1,14 @@
+using System.Collections.Frozen;
 using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using MoneyManagement.Application.Abstractions.Data;
 using MoneyManagement.Application.Abstractions.FxRates;
 using MoneyManagement.Application.Abstractions.Messaging;
+using MoneyManagement.Application.Features.Pools;
 using MoneyManagement.Domain.Accounts;
 using MoneyManagement.Domain.Categories;
 using MoneyManagement.Domain.Common;
+using MoneyManagement.Domain.Pools;
 using MoneyManagement.Domain.Transactions;
 using MoneyManagement.SharedKernel;
 
@@ -13,7 +16,8 @@ namespace MoneyManagement.Application.Features.Transactions.AdjustBalance;
 
 internal sealed class AdjustBalanceCommandHandler(
     IApplicationDbContext db,
-    IFxConverter fxConverter)
+    IFxConverter fxConverter,
+    IDateTimeProvider clock)
     : ICommandHandler<AdjustBalanceCommand, AdjustBalanceResult>
 {
     private const string AdjustmentDescription = "Balance adjustment";
@@ -25,14 +29,18 @@ internal sealed class AdjustBalanceCommandHandler(
     /// user can't enumerate per-trade transactions). Cash / current-account /
     /// credit-card balances are derived from full transaction history and
     /// reject manual balance changes.
+    /// <para>
+    /// Exposed to the assembly because <c>CreatePoolCommandHandler</c> requires
+    /// the same set: a pool lives on an account that must be re-priceable, and
+    /// an account that cannot take an Adjustment would freeze its NAV at
+    /// inception. Frozen so the shared set cannot be mutated by a caller.
+    /// </para>
     /// </summary>
-    private static readonly HashSet<AccountType> EligibleTypes =
-    [
+    internal static readonly FrozenSet<AccountType> EligibleTypes = FrozenSet.Create(
         AccountType.Brokerage,
         AccountType.CryptoExchange,
         AccountType.P2PLending,
-        AccountType.BankDeposit,
-    ];
+        AccountType.BankDeposit);
 
     public async Task<Result<AdjustBalanceResult>> Handle(
         AdjustBalanceCommand command,
@@ -50,6 +58,28 @@ internal sealed class AdjustBalanceCommandHandler(
         {
             return Result.Failure<AdjustBalanceResult>(
                 TransactionErrors.AdjustmentAccountTypeNotEligible(account.Type.ToString()));
+        }
+
+        // Pooled accounts: only a re-pricing mark, and only as of today.
+        //
+        // Investment/Withdrawal move value with no matching unit event, so the
+        // difference is silently shared pro-rata with the outside investors. And
+        // a back-dated Adjustment is worse than useless here: ResolveAdjustmentAsync
+        // below computes its delta against a DATE-BLIND sum of every row on the
+        // account, so dating one in the past corrupts both the NAV it strikes and
+        // today's balance. The pool's own commands write their marks inline and
+        // never reach this handler.
+        if (await PooledAccountGuard.IsPooledAsync(db, command.AccountId, cancellationToken))
+        {
+            if (command.Kind != BalanceChangeKind.Adjustment)
+            {
+                return Result.Failure<AdjustBalanceResult>(PoolErrors.KindNotAllowed);
+            }
+
+            if (command.Date != DateOnly.FromDateTime(clock.UtcNow))
+            {
+                return Result.Failure<AdjustBalanceResult>(PoolErrors.MarkMustBeToday);
+            }
         }
 
         string accountCurrency = account.Balance.Currency;

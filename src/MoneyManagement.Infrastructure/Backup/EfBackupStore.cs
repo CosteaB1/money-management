@@ -27,7 +27,9 @@ namespace MoneyManagement.Infrastructure.Backup;
 /// wipes the backed-up tables child-first (via <c>ExecuteDeleteAsync</c> with
 /// <c>IgnoreQueryFilters()</c> so soft-deleted rows go too), then reinserts
 /// parent-first. <c>category_patterns</c> is wiped before <c>categories</c> (its
-/// FK parent) and reinserted after them. The <c>fx_rates</c> table is
+/// FK parent) and reinserted after them. The pool trio is wiped FIRST of all
+/// (<c>pool_unit_events</c> FKs transactions, <c>pools</c> FKs accounts with
+/// RESTRICT) and reinserted LAST (all of those FKs are checked at insert time). The <c>fx_rates</c> table is
 /// intentionally left UNTOUCHED — it is neither wiped nor reinserted, so the
 /// user's locally fetched rates survive a restore.
 /// </para>
@@ -226,6 +228,59 @@ internal sealed class EfBackupStore(ApplicationDbContext context) : IBackupStore
                 p.UpdatedAt))
             .ToListAsync(cancellationToken);
 
+        List<PoolBackup> pools = await context.Pools
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Select(p => new PoolBackup(
+                p.Id,
+                p.AccountId,
+                p.Name,
+                p.Currency,
+                p.InceptionDate,
+                p.Notes,
+                p.IsArchived,
+                p.CreatedAt,
+                p.UpdatedAt))
+            .ToListAsync(cancellationToken);
+
+        List<PoolParticipantBackup> poolParticipants = await context.PoolParticipants
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Select(p => new PoolParticipantBackup(
+                p.Id,
+                p.PoolId,
+                p.Name,
+                p.IsOwner,
+                p.JoinedOn,
+                p.IsArchived,
+                p.CreatedAt,
+                p.UpdatedAt))
+            .ToListAsync(cancellationToken);
+
+        // Cash is a nullable Money persisted as two paired scalar columns the
+        // entity recombines on read (the SavingsGoal.ManualSavedAmount pattern),
+        // so project them via EF.Property to capture the raw pair.
+        List<PoolUnitEventBackup> poolUnitEvents = await context.PoolUnitEvents
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Select(e => new PoolUnitEventBackup(
+                e.Id,
+                e.PoolId,
+                e.ParticipantId,
+                e.Kind,
+                e.OccurredOn,
+                e.Units,
+                e.NavPerUnit,
+                e.PoolValuePreMoney,
+                EF.Property<decimal?>(e, "CashValue"),
+                EF.Property<string?>(e, "CashCurrency"),
+                e.SettledOn,
+                e.MovementTransactionId,
+                e.Notes,
+                e.CreatedAt,
+                e.UpdatedAt))
+            .ToListAsync(cancellationToken);
+
         return new BackupDocument(
             BackupSchemaVersion.Current,
             DateTimeOffset.UtcNow,
@@ -239,7 +294,10 @@ internal sealed class EfBackupStore(ApplicationDbContext context) : IBackupStore
             savingsGoals,
             savingsGoalContributions,
             loans,
-            loanPayments);
+            loanPayments,
+            pools,
+            poolParticipants,
+            poolUnitEvents);
     }
 
     public async Task<ImportDataResult> RestoreAsync(BackupDocument document, CancellationToken cancellationToken)
@@ -250,7 +308,16 @@ internal sealed class EfBackupStore(ApplicationDbContext context) : IBackupStore
         // Wipe child-first to respect FKs. ExecuteDeleteAsync issues a single
         // DELETE per table and bypasses the change tracker; IgnoreQueryFilters
         // ensures soft-deleted transactions and archived rows are removed too.
-        // Loan payments then loans go FIRST — both FK transactions, so they
+        // The pool trio goes FIRST, child-first within itself. pool_unit_events
+        // FKs BOTH transactions (SET NULL) and pool_participants (CASCADE), and
+        // pools FKs accounts with ON DELETE RESTRICT — so all three must be gone
+        // before the transactions wipe below AND before the accounts wipe at the
+        // bottom, or that accounts DELETE hard-errors on the restrict.
+        await context.PoolUnitEvents.IgnoreQueryFilters().ExecuteDeleteAsync(cancellationToken);
+        await context.PoolParticipants.IgnoreQueryFilters().ExecuteDeleteAsync(cancellationToken);
+        await context.Pools.IgnoreQueryFilters().ExecuteDeleteAsync(cancellationToken);
+
+        // Loan payments then loans go next — both FK transactions, so they
         // must be gone before the transactions wipe below.
         await context.LoanPayments.IgnoreQueryFilters().ExecuteDeleteAsync(cancellationToken);
         await context.Loans.IgnoreQueryFilters().ExecuteDeleteAsync(cancellationToken);
@@ -297,6 +364,15 @@ internal sealed class EfBackupStore(ApplicationDbContext context) : IBackupStore
         int loans = await InsertLoansAsync(document.Loans, cancellationToken);
         int loanPayments = await InsertLoanPaymentsAsync(document.LoanPayments, cancellationToken);
 
+        // The pool trio goes LAST, parent-first within itself. pools needs its
+        // account to exist (RESTRICT), pool_participants needs its pool, and
+        // pool_unit_events needs its pool, its participant AND its movement
+        // transaction — every one of those FKs is checked at insert time, so this
+        // is the only ordering that satisfies all of them.
+        int pools = await InsertPoolsAsync(document.Pools, cancellationToken);
+        int poolParticipants = await InsertPoolParticipantsAsync(document.PoolParticipants, cancellationToken);
+        int poolUnitEvents = await InsertPoolUnitEventsAsync(document.PoolUnitEvents, cancellationToken);
+
         await transaction.CommitAsync(cancellationToken);
 
         return new ImportDataResult(
@@ -310,7 +386,10 @@ internal sealed class EfBackupStore(ApplicationDbContext context) : IBackupStore
             savingsGoals,
             savingsGoalContributions,
             loans,
-            loanPayments);
+            loanPayments,
+            pools,
+            poolParticipants,
+            poolUnitEvents);
     }
 
     // ---- Inserts ---------------------------------------------------------
@@ -634,6 +713,108 @@ internal sealed class EfBackupStore(ApplicationDbContext context) : IBackupStore
                     P(r.AmountCurrency),
                     P(r.OccurredOn),
                     PNullable(r.TransactionId),
+                    PNullable(r.Notes),
+                    P(r.CreatedAt),
+                    P(r.UpdatedAt),
+                ],
+                ct);
+        }
+
+        return count;
+    }
+
+    private async Task<int> InsertPoolsAsync(IReadOnlyList<PoolBackup> rows, CancellationToken ct)
+    {
+        // After accounts: account_id is ON DELETE RESTRICT and UNIQUE, so the
+        // account must already exist and no two pools may share it.
+        string sql = InsertSql<Domain.Pools.Pool>(
+            "id", "account_id", "name", "currency", "inception_date", "notes",
+            "is_archived", "created_at", "updated_at");
+
+        int count = 0;
+        foreach (PoolBackup r in rows)
+        {
+            count += await context.Database.ExecuteSqlRawAsync(
+                sql,
+                [
+                    P(r.Id),
+                    P(r.AccountId),
+                    P(r.Name),
+                    P(r.Currency),
+                    P(r.InceptionDate),
+                    PNullable(r.Notes),
+                    P(r.IsArchived),
+                    P(r.CreatedAt),
+                    P(r.UpdatedAt),
+                ],
+                ct);
+        }
+
+        return count;
+    }
+
+    private async Task<int> InsertPoolParticipantsAsync(
+        IReadOnlyList<PoolParticipantBackup> rows,
+        CancellationToken ct)
+    {
+        // After pools (CASCADE FK). The partial unique index on
+        // (pool_id) WHERE is_owner means a hand-edited document carrying two
+        // owners for one pool fails here and rolls the whole restore back.
+        string sql = InsertSql<Domain.Pools.PoolParticipant>(
+            "id", "pool_id", "name", "is_owner", "joined_on", "is_archived", "created_at", "updated_at");
+
+        int count = 0;
+        foreach (PoolParticipantBackup r in rows)
+        {
+            count += await context.Database.ExecuteSqlRawAsync(
+                sql,
+                [
+                    P(r.Id),
+                    P(r.PoolId),
+                    P(r.Name),
+                    P(r.IsOwner),
+                    P(r.JoinedOn),
+                    P(r.IsArchived),
+                    P(r.CreatedAt),
+                    P(r.UpdatedAt),
+                ],
+                ct);
+        }
+
+        return count;
+    }
+
+    private async Task<int> InsertPoolUnitEventsAsync(
+        IReadOnlyList<PoolUnitEventBackup> rows,
+        CancellationToken ct)
+    {
+        // units / nav_per_unit are numeric(28,12) and are bound as plain
+        // decimals, so twelve decimal places survive verbatim. cash_value /
+        // cash_currency are the paired columns behind the entity's nullable
+        // Money?; settled_on is NULL on an unpaid distribution.
+        string sql = InsertSql<Domain.Pools.PoolUnitEvent>(
+            "id", "pool_id", "participant_id", "kind", "occurred_on", "units", "nav_per_unit",
+            "pool_value_pre_money", "cash_value", "cash_currency", "settled_on",
+            "movement_transaction_id", "notes", "created_at", "updated_at");
+
+        int count = 0;
+        foreach (PoolUnitEventBackup r in rows)
+        {
+            count += await context.Database.ExecuteSqlRawAsync(
+                sql,
+                [
+                    P(r.Id),
+                    P(r.PoolId),
+                    P(r.ParticipantId),
+                    P(r.Kind.ToString()),
+                    P(r.OccurredOn),
+                    P(r.Units),
+                    P(r.NavPerUnit),
+                    P(r.PoolValuePreMoney),
+                    PNullable(r.CashValue),
+                    PNullable(r.CashCurrency),
+                    PNullable(r.SettledOn),
+                    PNullable(r.MovementTransactionId),
                     PNullable(r.Notes),
                     P(r.CreatedAt),
                     P(r.UpdatedAt),

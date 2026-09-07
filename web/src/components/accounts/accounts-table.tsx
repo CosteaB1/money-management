@@ -140,7 +140,23 @@ export function AccountsTable() {
                     </Link>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="secondary">{TYPE_LABEL[account.type]}</Badge>
+                    <span className="inline-flex flex-wrap items-center gap-1.5">
+                      <Badge variant="secondary">{TYPE_LABEL[account.type]}</Badge>
+                      {/* The balance beside it is the account's FULL value,
+                          pooled or not — the account really does hold the other
+                          participants' money, and that was decided explicitly.
+                          This badge is what tells the user the number is gross
+                          rather than theirs; only net worth applies the share. */}
+                      {account.isPooled && (
+                        <Badge
+                          variant="warning"
+                          data-testid="account-pooled-badge"
+                          title="Some of this balance belongs to other people. Your net worth only counts your share."
+                        >
+                          Pooled
+                        </Badge>
+                      )}
+                    </span>
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {formatMoney(account.balance, account.currency)}

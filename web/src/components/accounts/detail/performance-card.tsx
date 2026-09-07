@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Badge } from '@/src/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/src/components/ui/tabs';
 import { cn } from '@/src/lib/utils/cn';
@@ -48,6 +49,15 @@ function Cell({ label, value, subtitle, testId, valueClassName }: CellProps) {
  *
  * The YTD / All-time toggle only swaps the source of the activity
  * totals — Current is NOT window-scoped and stays put.
+ *
+ * **On a pooled account the three KPIs are the OWNER's, not the
+ * account's**, and the card has to say so. Another participant's money in
+ * is not the user's contribution, their payout is not the user's
+ * withdrawal, and only the user's share of a re-pricing is the user's
+ * profit — left unlabelled, the card would present the participants'
+ * capital as deposits the user made. The Current value line underneath
+ * stays gross, matching /accounts and the balance-over-time report, which
+ * is exactly why the two need distinguishing on screen.
  */
 export function PerformanceCard({ account }: Props) {
   const [window, setWindow] = useState<Window>('YTD');
@@ -65,7 +75,14 @@ export function PerformanceCard({ account }: Props) {
   return (
     <Card data-testid="performance-card" data-window={window}>
       <CardHeader className="flex flex-row items-center justify-between gap-3 pb-3">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Performance</CardTitle>
+        <CardTitle className="flex flex-wrap items-center gap-2 text-sm font-medium text-muted-foreground">
+          Performance
+          {account.isPooled && (
+            <Badge variant="warning" data-testid="perf-owner-only-badge">
+              Your share only
+            </Badge>
+          )}
+        </CardTitle>
         <Tabs
           value={window}
           onValueChange={(v) => setWindow(v as Window)}
@@ -139,6 +156,14 @@ export function PerformanceCard({ account }: Props) {
             </span>
           )}
         </div>
+
+        {account.isPooled && (
+          <p className="text-xs text-muted-foreground" data-testid="perf-pooled-note">
+            This account is pooled, so the three figures above count only your side of it — other
+            people&rsquo;s money in and out is excluded, and profit is split by share. The current
+            value is the <strong>whole</strong> account, the same figure /accounts shows.
+          </p>
+        )}
 
         {totals.missingFxRate && (
           <output

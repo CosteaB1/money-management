@@ -33,6 +33,15 @@ public static class DependencyInjection
             // depend on. Scoped because they query the request's DbContext.
             .AddClasses(c => c.AssignableTo<IExternalClaimSource>(), publicOnly: false)
                 .AsImplementedInterfaces()
+                .WithScopedLifetime()
+            // Ownership sources are the second net-worth collaborator seam and
+            // are registered separately on purpose — see IAccountOwnershipSource
+            // for why they are NOT claims. PoolAccountOwnershipSource is picked
+            // up here and runs on every net-worth request; the handlers still
+            // take IEnumerable<> so zero registrations stays a valid,
+            // behaviour-neutral state for an app with no pools.
+            .AddClasses(c => c.AssignableTo<IAccountOwnershipSource>(), publicOnly: false)
+                .AsImplementedInterfaces()
                 .WithScopedLifetime());
 
         services.AddValidatorsFromAssembly(assembly, includeInternalTypes: true);

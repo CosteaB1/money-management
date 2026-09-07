@@ -92,7 +92,7 @@ public sealed class NetWorthTrendClaimDeductionTests
     }
 
     private static GetNetWorthTrendQueryHandler Handler(IApplicationDbContext db, IFxConverter? fx = null) =>
-        new(db, fx ?? FakeFxConverter.Identity(), new LoanExternalClaimSource(db), Clock());
+        new(db, fx ?? FakeFxConverter.Identity(), new LoanExternalClaimSource(db), [], Clock());
 
     [Fact]
     public async Task Trend_ReceivedLoan_DoesNotDepressPointsBeforeItExisted()

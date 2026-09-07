@@ -117,7 +117,7 @@ public class GetAccountDetailQueryHandlerTests
     public async Task Returns_account_not_found_for_unknown_id()
     {
         IApplicationDbContext db = FakeApplicationDbContext.Create();
-        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), Clock());
+        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), [], Clock());
 
         Result<AccountDetailDto> result = await handler.Handle(
             new GetAccountDetailQuery(Guid.NewGuid()), CancellationToken.None);
@@ -133,7 +133,7 @@ public class GetAccountDetailQueryHandlerTests
         account.Archive();
         IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [account]);
 
-        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), Clock());
+        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), [], Clock());
 
         Result<AccountDetailDto> result = await handler.Handle(
             new GetAccountDetailQuery(account.Id), CancellationToken.None);
@@ -153,7 +153,7 @@ public class GetAccountDetailQueryHandlerTests
             accounts: [account],
             transactions: [income]);
 
-        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), Clock());
+        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), [], Clock());
 
         Result<AccountDetailDto> result = await handler.Handle(
             new GetAccountDetailQuery(account.Id), CancellationToken.None);
@@ -188,7 +188,7 @@ public class GetAccountDetailQueryHandlerTests
             accounts: [account],
             transactions: transactions);
 
-        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), Clock());
+        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), [], Clock());
 
         Result<AccountDetailDto> result = await handler.Handle(
             new GetAccountDetailQuery(account.Id), CancellationToken.None);
@@ -224,7 +224,7 @@ public class GetAccountDetailQueryHandlerTests
             accounts: [account],
             transactions: transactions);
 
-        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), Clock());
+        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), [], Clock());
 
         Result<AccountDetailDto> result = await handler.Handle(
             new GetAccountDetailQuery(account.Id), CancellationToken.None);
@@ -259,7 +259,7 @@ public class GetAccountDetailQueryHandlerTests
             accounts: [account],
             transactions: transactions);
 
-        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), Clock());
+        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), [], Clock());
 
         Result<AccountDetailDto> result = await handler.Handle(
             new GetAccountDetailQuery(account.Id), CancellationToken.None);
@@ -297,7 +297,7 @@ public class GetAccountDetailQueryHandlerTests
             accounts: [account],
             transactions: transactions);
 
-        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), Clock());
+        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), [], Clock());
 
         Result<AccountDetailDto> result = await handler.Handle(
             new GetAccountDetailQuery(account.Id), CancellationToken.None);
@@ -327,7 +327,7 @@ public class GetAccountDetailQueryHandlerTests
             accounts: [account],
             transactions: [kept, deletedContrib, deletedAdj, deletedReal]);
 
-        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), Clock());
+        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), [], Clock());
 
         Result<AccountDetailDto> result = await handler.Handle(
             new GetAccountDetailQuery(account.Id), CancellationToken.None);
@@ -364,7 +364,7 @@ public class GetAccountDetailQueryHandlerTests
             accounts: [account],
             transactions: transactions);
 
-        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), Clock());
+        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), [], Clock());
 
         Result<AccountDetailDto> result = await handler.Handle(
             new GetAccountDetailQuery(account.Id), CancellationToken.None);
@@ -393,7 +393,7 @@ public class GetAccountDetailQueryHandlerTests
             accounts: [account],
             transactions: [priorYearDec31, ytdJan1, ytdMid]);
 
-        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), Clock());
+        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), [], Clock());
 
         Result<AccountDetailDto> result = await handler.Handle(
             new GetAccountDetailQuery(account.Id), CancellationToken.None);
@@ -436,7 +436,7 @@ public class GetAccountDetailQueryHandlerTests
             accounts: [account],
             transactions: [usdContrib, chfContrib, usdAdj]);
 
-        var handler = new GetAccountDetailQueryHandler(db, fx, Clock());
+        var handler = new GetAccountDetailQueryHandler(db, fx, [], Clock());
 
         Result<AccountDetailDto> result = await handler.Handle(
             new GetAccountDetailQuery(account.Id), CancellationToken.None);
@@ -467,7 +467,7 @@ public class GetAccountDetailQueryHandlerTests
             accounts: [account],
             transactions: transactions);
 
-        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), Clock());
+        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), [], Clock());
 
         Result<AccountDetailDto> result = await handler.Handle(
             new GetAccountDetailQuery(account.Id), CancellationToken.None);
@@ -482,7 +482,7 @@ public class GetAccountDetailQueryHandlerTests
         Account account = NewAccount("Cash MDL", "MDL", 500m);
         IApplicationDbContext db = FakeApplicationDbContext.Create(accounts: [account]);
 
-        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), Clock());
+        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), [], Clock());
 
         Result<AccountDetailDto> result = await handler.Handle(
             new GetAccountDetailQuery(account.Id), CancellationToken.None);
@@ -514,7 +514,7 @@ public class GetAccountDetailQueryHandlerTests
             accounts: [account],
             transactions: [withdrawal, adjustment]);
 
-        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), Clock());
+        var handler = new GetAccountDetailQueryHandler(db, IdentityConverter(), [], Clock());
 
         Result<AccountDetailDto> result = await handler.Handle(
             new GetAccountDetailQuery(account.Id), CancellationToken.None);

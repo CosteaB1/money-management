@@ -18,6 +18,7 @@ namespace MoneyManagement.Application.Features.Dashboard.GetNetWorthTrend;
 /// <item>For the current month, the as-of date is "now" so the latest point is live.</item>
 /// <item>Each point sums every non-archived account's native balance (anchor + Σ income − Σ expense over rows ≤ asOf), FX-converted to MDL at that as-of date.</item>
 /// <item>Each point then deducts the external claims outstanding at that same as-of date, so borrowed money never reads as wealth.</item>
+/// <item>Each account contributes only the user's SHARE of its balance at that as-of date (see <see cref="IAccountOwnershipSource"/>); outside capital is never counted as wealth, so nothing has to subtract it back out.</item>
 /// </list>
 /// Mirrors <c>GetAccountsQueryHandler</c>'s balance arithmetic — non-deleted
 /// transactions only; transfers, adjustments and fees all contribute.
@@ -26,6 +27,7 @@ internal sealed class GetNetWorthTrendQueryHandler(
     IApplicationDbContext db,
     IFxConverter fxConverter,
     IExternalClaimSource claimSource,
+    IEnumerable<IAccountOwnershipSource> ownershipSources,
     IDateTimeProvider clock)
     : IQueryHandler<GetNetWorthTrendQuery, IReadOnlyList<NetWorthTrendPointDto>>
 {
@@ -61,6 +63,12 @@ internal sealed class GetNetWorthTrendQueryHandler(
         // fetched once and re-sliced per point. A per-point query would turn one
         // round-trip into 24.
         IReadOnlyList<ExternalClaim> claims = await claimSource.GetHistoryAsync(cancellationToken);
+
+        // Same one-shot rule again for the ownership curves: loaded once here,
+        // then sliced per point. With no source registered this is an empty
+        // lookup that answers 1m for every account, so the series is unchanged.
+        AccountOwnershipLedger ownership =
+            await AccountOwnershipLedger.LoadAsync(ownershipSources, cancellationToken);
 
         // Build the list of as-of dates, oldest first.
         //
@@ -111,7 +119,10 @@ internal sealed class GetNetWorthTrendQueryHandler(
                     continue;
                 }
 
-                netWorthMdl += converted.Value;
+                // The point's OWN date, never today's — an account diluted in
+                // May must still read as wholly owned on the March point, the
+                // same discipline the FX conversion above follows.
+                netWorthMdl += converted.Value * ownership.OwnedFractionAsOf(account.Id, asOf);
             }
 
             // Now net out the obligations. OutstandingAsOf is the claim-side
