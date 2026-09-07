@@ -9,6 +9,7 @@ import {
   useArchivePool,
   useCloseDistribution,
   useCreatePool,
+  useDeletePool,
   useDeletePoolEvent,
   usePoolDetail,
   usePools,
@@ -16,6 +17,7 @@ import {
   useRecordRedemption,
   useRecordSubscription,
   useSettleDistribution,
+  useUnarchivePool,
 } from '@/src/lib/api/pools';
 import { server } from '@/src/lib/mocks/server';
 
@@ -281,5 +283,74 @@ describe('pool mutation invalidation sets', () => {
     for (const expected of MONEY_MOVEMENT_KEYS) {
       expect(keys).toContain(expected);
     }
+  });
+
+  it('useUnarchivePool posts to the unarchive route and invalidates the full set', async () => {
+    let url = '';
+    let method = '';
+    server.use(
+      http.post('*/pools/:id/unarchive', ({ request }) => {
+        url = request.url;
+        method = request.method;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    const client = createClient();
+    const spy = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => useUnarchivePool(), { wrapper: wrapperFor(client) });
+
+    await result.current.mutateAsync(POOL_ID);
+
+    expect(method).toBe('POST');
+    expect(url).toContain(`/pools/${POOL_ID}/unarchive`);
+    const keys = invalidatedKeys(spy);
+    for (const expected of MONEY_MOVEMENT_KEYS) {
+      expect(keys).toContain(expected);
+    }
+  });
+
+  it('useDeletePool hits DELETE /pools/{id} and invalidates the full set', async () => {
+    let url = '';
+    let method = '';
+    server.use(
+      http.delete('*/pools/:id', ({ request }) => {
+        url = request.url;
+        method = request.method;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    const client = createClient();
+    const spy = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => useDeletePool(), { wrapper: wrapperFor(client) });
+
+    await result.current.mutateAsync(POOL_ID);
+
+    expect(method).toBe('DELETE');
+    expect(url).toMatch(new RegExp(`/pools/${POOL_ID}$`));
+    const keys = invalidatedKeys(spy);
+    for (const expected of MONEY_MOVEMENT_KEYS) {
+      expect(keys).toContain(expected);
+    }
+  });
+
+  it('useDeletePool surfaces the has-movements refusal to the caller', async () => {
+    server.use(
+      http.delete('*/pools/:id', () =>
+        HttpResponse.json(
+          { errorCode: 'pools.delete_has_movements', detail: 'Archive it instead.' },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    const client = createClient();
+    const { result } = renderHook(() => useDeletePool(), { wrapper: wrapperFor(client) });
+
+    await expect(result.current.mutateAsync(POOL_ID)).rejects.toMatchObject({
+      status: 409,
+      message: 'Archive it instead.',
+    });
   });
 });

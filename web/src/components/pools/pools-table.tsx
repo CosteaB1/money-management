@@ -3,7 +3,9 @@
 import { AlertTriangle, MoreHorizontal } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { ArchivePoolDialog } from '@/src/components/pools/archive-pool-dialog';
+import { DeletePoolDialog } from '@/src/components/pools/delete-pool-dialog';
 import { Badge } from '@/src/components/ui/badge';
 import { Button } from '@/src/components/ui/button';
 import {
@@ -22,7 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/src/components/ui/table';
-import { usePools } from '@/src/lib/api/pools';
+import { usePools, useUnarchivePool } from '@/src/lib/api/pools';
 import { formatMoney } from '@/src/lib/utils/currency';
 import { formatFractionPercent } from '@/src/lib/utils/pool';
 import type { PoolDto } from '@/src/types/api';
@@ -36,17 +38,27 @@ const COLUMN_COUNT = 8;
  * of them needs the participant roster, which only the detail endpoint
  * returns. Putting a "Record subscription" here would mean either a second
  * fetch per row or a picker that cannot name anyone. The row menu carries only
- * Archive; everything else is one click away on `/pools/{id}`.
+ * the lifecycle actions; everything else is one click away on `/pools/{id}`.
  *
- * There is no Unarchive counterpart, and that is not an omission — the backend
- * exposes no route for it. Archiving is only permitted once no outside units
- * remain, so an archived pool's account is a wholly-owned account again and
- * re-opening it would silently re-take a share of it.
+ * An archived row collapses to **Unarchive + Delete**, mirroring the loans and
+ * accounts tables: the pool is out of service, so the only questions left are
+ * whether to put it back or remove it entirely.
  */
 export function PoolsTable() {
   const [includeArchived, setIncludeArchived] = useState(false);
   const { data, isLoading, isError } = usePools(includeArchived);
+  const unarchive = useUnarchivePool();
   const [archiveTarget, setArchiveTarget] = useState<PoolDto | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PoolDto | null>(null);
+
+  const handleUnarchive = async (pool: PoolDto) => {
+    try {
+      await unarchive.mutateAsync(pool.id);
+      toast.success(`Unarchived "${pool.name}"`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to unarchive pool');
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -100,7 +112,13 @@ export function PoolsTable() {
               </TableRow>
             ) : (
               data.map((pool) => (
-                <PoolRow key={pool.id} pool={pool} onArchive={() => setArchiveTarget(pool)} />
+                <PoolRow
+                  key={pool.id}
+                  pool={pool}
+                  onArchive={() => setArchiveTarget(pool)}
+                  onUnarchive={() => handleUnarchive(pool)}
+                  onDelete={() => setDeleteTarget(pool)}
+                />
               ))
             )}
           </TableBody>
@@ -116,11 +134,37 @@ export function PoolsTable() {
           }}
         />
       )}
+
+      {deleteTarget && (
+        <DeletePoolDialog
+          pool={deleteTarget}
+          open={deleteTarget !== null}
+          onOpenChange={(next) => {
+            if (!next) setDeleteTarget(null);
+          }}
+          // The refusal's own next step: hand the same row to the archive
+          // confirm rather than making the user find the menu again.
+          onArchiveInstead={() => {
+            setDeleteTarget(null);
+            setArchiveTarget(deleteTarget);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function PoolRow({ pool, onArchive }: { pool: PoolDto; onArchive: () => void }) {
+function PoolRow({
+  pool,
+  onArchive,
+  onUnarchive,
+  onDelete,
+}: {
+  pool: PoolDto;
+  onArchive: () => void;
+  onUnarchive: () => void;
+  onDelete: () => void;
+}) {
   return (
     <TableRow data-testid="pool-row" data-archived={pool.isArchived ? 'true' : 'false'}>
       <TableCell className="font-medium">
@@ -195,34 +239,48 @@ function PoolRow({ pool, onArchive }: { pool: PoolDto; onArchive: () => void }) 
         )}
       </TableCell>
       <TableCell className="text-right">
-        {pool.isArchived ? (
-          // Archiving is one-way by design — there is no unarchive route to
-          // offer, so an archived row carries no menu at all.
-          <span className="sr-only">Archived pools have no actions</span>
-        ) : (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={`Actions for ${pool.name}`}
-                data-testid="pool-actions"
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem asChild>
-                <Link href={`/pools/${pool.id}`} data-testid="open-pool-action">
-                  Open pool
-                </Link>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={`Actions for ${pool.name}`}
+              data-testid="pool-actions"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {/* Navigation, not a mutation — archived pools stay drillable, so
+                it is offered in both states. */}
+            <DropdownMenuItem asChild>
+              <Link href={`/pools/${pool.id}`} data-testid="open-pool-action">
+                Open pool
+              </Link>
+            </DropdownMenuItem>
+            {pool.isArchived ? (
+              // Out of service: put it back, or remove it. Archive is not
+              // offered — it is already archived.
+              <DropdownMenuItem onClick={onUnarchive} data-testid="unarchive-pool-action">
+                Unarchive
               </DropdownMenuItem>
+            ) : (
               <DropdownMenuItem onClick={onArchive} data-testid="archive-pool-action">
                 Archive
               </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+            )}
+            {/* Delete is the created-by-mistake exit and is destructive in a
+                way Archive is not, so it is styled apart from it — same
+                treatment the accounts table gives its permanent delete. */}
+            <DropdownMenuItem
+              onClick={onDelete}
+              data-testid="delete-pool-action"
+              className="text-destructive focus:text-destructive"
+            >
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </TableCell>
     </TableRow>
   );

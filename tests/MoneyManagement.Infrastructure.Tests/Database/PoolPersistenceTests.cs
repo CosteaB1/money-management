@@ -295,6 +295,64 @@ public sealed class PoolPersistenceTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// <c>DELETE /pools/{id}</c> leans on the database taking the children with
+    /// the parent, so the cascade is verified rather than assumed - and verified
+    /// as raw SQL (<c>ExecuteDelete</c> bypasses the change tracker), so it is
+    /// the FK doing the work here, not EF's cascade-on-tracked-graph.
+    /// <para>
+    /// The delete command removes participants and events explicitly as well.
+    /// Both belts are deliberate: this test is what would fail if a future
+    /// migration changed <c>ON DELETE CASCADE</c> to <c>RESTRICT</c> and turned
+    /// the command's save into a foreign-key crash.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task DeletingAPoolRow_CascadesToItsParticipantsAndUnitEvents_ButLeavesTheAccount()
+    {
+        await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction tx =
+            await _context.Database.BeginTransactionAsync();
+        try
+        {
+            (Pool pool, PoolParticipant owner) = await SeedPoolAsync();
+
+            _context.PoolUnitEvents.Add(UnitEvent(
+                pool,
+                owner.Id,
+                PoolUnitEventKind.Seed,
+                pool.InceptionDate,
+                poolValuePreMoney: 0m,
+                cash: null,
+                participantIsOwner: true));
+
+            // Archived, because that is the state the stuck pools are in and the
+            // command loads them with IgnoreQueryFilters.
+            Pool tracked = await _context.Pools.IgnoreQueryFilters().SingleAsync(p => p.Id == pool.Id);
+            tracked.Archive(outsideUnitsOutstanding: 0m).IsSuccess.Should().BeTrue();
+
+            await _context.SaveChangesAsync();
+            _context.ChangeTracker.Clear();
+
+            await _context.Pools
+                .IgnoreQueryFilters()
+                .Where(p => p.Id == pool.Id)
+                .ExecuteDeleteAsync();
+
+            (await _context.PoolParticipants.AnyAsync(p => p.PoolId == pool.Id)).Should().BeFalse();
+            (await _context.PoolUnitEvents.AnyAsync(e => e.PoolId == pool.Id)).Should().BeFalse();
+
+            // The other direction of the same FK: pools.account_id is RESTRICT,
+            // so the account is the pool's parent, never its child. Removing a
+            // pool must never take the account with it.
+            (await _context.Accounts.AnyAsync(a => a.Id == pool.AccountId)).Should().BeTrue();
+        }
+        finally
+        {
+            _context.ChangeTracker.Clear();
+            await tx.RollbackAsync();
+        }
+    }
+
+    /// <summary>
     /// The registered <see cref="IAccountOwnershipSource"/>, resolved over THIS
     /// context so it sees the uncommitted rows. Goes through the container rather
     /// than <c>new</c> because the producer is internal to the Application

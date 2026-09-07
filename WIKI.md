@@ -302,11 +302,19 @@ fixed percentage.
   to exactly the base, so the rule is permanent with no reset logic. **The cost, which was stated to
   the friends in writing: a green month can pay zero** — down 15% then up 10% leaves them below
   their 1,000 and nobody is paid.
-- **The pool is the whole Binance account, one typed number.** Futures / earn / fiat / spot are not
-  tracked separately, so moving money between them is invisible to the app. Value leaves the pool
-  only when it lands in **another tracked account** (Bybit) — one rule, no special cases. Include the
-  **BNB balance** in the total every time; either convention nets out, but *switching* between them
-  manufactures phantom profit.
+- **The pool is the Binance FUTURES wallet, tracked as its own account** (revised 2026-09-07; it was
+  originally scoped to the whole Binance login). The pooled money sits in futures while you hold your
+  own money elsewhere in the same Binance account, and one pool cannot span both: your idle spot
+  balance would dilute the friends' return. On a +10% futures month with 3,000 in futures and 2,000
+  of yours in spot, a whole-account pool pays them 6% instead of 10% — about 40 short each — and any
+  spot trade you make silently reprices their stake. So `Binance Futures` is its own account and
+  carries the pool; `Binanance` keeps everything else and is not pooled.
+- **Value leaves the pool when it lands in another tracked account** — which now includes
+  **futures → spot**, because the rest of Binance is tracked too. Every futures ↔ spot move of your
+  own money is an owner subscription or redemption at NAV. Include the **BNB balance** in the total
+  every time; either convention nets out, but *switching* between them manufactures phantom profit.
+  *(Your fee BNB is held in the futures wallet, so it is pool property and this rule is unaffected by
+  the futures-only scope — confirmed 2026-09-07.)*
 - **Close and pay are separate steps.** The month is marked at month-end; the USDT physically leaves
   at the start of the next month. Dating the payout at close would leave that cash in the next
   snapshot, where it is re-attributed as fresh profit — paying the friends twice on the same money,
@@ -404,7 +412,14 @@ For an account that holds other people's money alongside your own.
 
 - List of pools with your share, outside capital, pool value and any unpaid payouts; **Show archived** toggle
 - Pool detail: value and price-per-share, who holds what **as percentages**, the full movement ledger, and a reconciliation panel that appears only when something does not add up
-- Record money in / money out, close the month, mark a payout as sent, record a shared cost, add a participant, archive the pool
+- Record money in / money out, close the month, mark a payout as sent, record a shared cost, add a participant
+- **Three ways out, and they are not interchangeable.** *Archive* winds down a pool that ran its
+  course — it needs everyone else paid out first, keeps the whole ledger, stays readable, and can
+  be **undone** with Unarchive (which puts the account's guards back). *Delete* is only for a pool
+  you created by mistake and that never moved anyone's money; a pool with any cash through it is
+  refused and points you at Archive instead. **Deleting a pool does not undo anything on the
+  account** — any balance adjustment it wrote stays, because it really did move your balance and
+  you may have reconciled against it; delete that from the transactions page yourself if it is wrong
 - **Every action that moves money first demands the exchange's real total right now** — including BNB — because a share is priced against the pool's value at that moment. The app refuses to record the movement without it
 - **Closing a month and paying it out are two separate steps.** Closing works out what is owed and retires the matching shares but moves no money; you mark each payout as sent on the day the transfer actually leaves
 - Nobody is paid below what they put in, so **a month the pool went up can still pay out nothing** — that is the high-water rule working, not a bug

@@ -530,8 +530,31 @@ pro-rata with the friends.** Every row ships in the same commit as the writes.
 | `RecordLoanPayment` | the payment `AccountId` is the pooled one | same shape, opposite direction: cash out with no unit event, so the owner funds part of the friends' stake |
 | `DeleteLoanPayment` | its linked row is referenced by a unit event, or dated ≤ the latest one | soft-deletes the transaction **inline**, so `DeleteTransaction`'s guard never sees it — same rule, second door |
 | `CreatePool` | a savings goal already links that account | the reverse of the goal guard, which only asked one way: `SavingsGoal.Saved` **is** the balance, so goal-then-pool counts the friends' capital as the user's progress |
-| `DeleteAccount` | a pool (even archived) holds the account | `pools.account_id` is `RESTRICT`; a pool with no transactions clears every other check, so the FK raises an unhandled **500** where a 409 "archive it instead" was owed |
+| `DeleteAccount` | a pool (even archived) holds the account | `pools.account_id` is `RESTRICT`; a pool with no transactions clears every other check, so the FK raises an unhandled **500** where a 409 was owed. **Archived pools deliberately keep counting.** The tempting fix for "an archived pool blocks this forever" is to stop counting them, and it is wrong: the row survives archiving, so skipping the check does not make the account deletable, it just trades the 409 back for that 500. The pre-check has to mirror the FK exactly; the way out is `DELETE /pools/{id}`, never a laxer pre-check |
+| `DeletePool` | a non-owner holds units, **or** any unit event carries cash or a `MovementTransactionId` | `pools.delete_has_movements` (**409**). The hard delete is allowed *only* for a pool that provably holds nobody else’s money and provably moved none — in practice "a seed and nothing else", the created-by-mistake shape. The units half is the same count `Pool.Archive` is judged on, so **deletable is never laxer than archivable** on the only question that matters |
 | `RecordRedemption` | a `DestinationAccountId` is named and the participant is **not the owner** | the pool-side leg is excluded from the owner's figures, but the **counter leg lands on a wholly-owned account**, where it reads as the user's own contribution and counts in full towards net worth — a friend's money would become the user's. The owner's Bybit withdrawal (§6, Sep 18) is the intended use and is untouched; a friend's payout leaves the tracked world, so it is one leg with no counter account (`pools.destination_requires_owner`) |
+
+**Archive is no longer the only exit (`DELETE /pools/{id}`, `POST /pools/{id}/unarchive`).** The
+original reasoning — archiving already demands zero outside units, so an archived pool’s account is
+wholly the owner’s again — holds for *winding down a real pool* and fails for a pool created **by
+mistake**: it could not be deleted, its seed could not be deleted (`pools.seed_cannot_be_deleted`),
+and the archived row went on holding its account through the `RESTRICT` FK forever. Both new routes
+work on archived rows (`IgnoreQueryFilters`) because the stuck ones are precisely the archived ones.
+
+- **Delete** removes the pool, its participants and its unit events (the FKs cascade; the handler
+  also removes the children explicitly, so the intent is testable above the database). It is guarded
+  as in the table above, and it **deliberately does not touch transactions**: a pool’s catch-up mark
+  is a real `IsAdjustment` row that genuinely moved the account’s balance to what the exchange was
+  showing, and may have been reconciled against — silently reversing it would rewrite balance
+  history to undo a correction that was true. So a **204 does not mean the account’s history rolled
+  back**; if the mark itself was wrong, delete it from the transactions page, where the pool is no
+  longer there to raise `pools.delete_reprices_units`.
+- **Unarchive** is an idempotent boolean flip that touches no money. Net worth does not move
+  (`PoolAccountOwnershipSource` already reads archived pools with `IgnoreQueryFilters()`), and the
+  direction of travel is towards **more** restriction — an active pool re-arms every row of the guard
+  table — which is why it needs no mirror of archive’s outside-units check. Without it archiving was
+  a one-way *and locked* door: `ix_pools_account_id` is unique and deliberately unfiltered on
+  `is_archived`, so a mis-click left the account unable to hold any pool at all.
 
 **Read-side divergence, decided explicitly:** `/accounts`, Balance-over-time and `GetSummary` keep
 showing the **full** account value with a "Pooled" badge — the account really does hold that money.
@@ -773,14 +796,41 @@ Say "yes to defaults" if these all look right.
 These came out of walking the plan through with the user and are **binding on Phase 2**. Three were
 not in the original design at all.
 
-**Pool boundary — the whole Binance account, one number.** Binance holds futures / earn / fiat / spot
-sub-wallets and the user explicitly does not want them tracked separately. So the pool is the app's
-existing `Binanance` account, and the figure typed at close is the total across everything on Binance.
+**Pool boundary — the FUTURES wallet, tracked as its own account.** ⚠️ **REVISED 2026-09-07; this
+replaces the original "whole Binance account, one number" decision, which was wrong about the facts.**
 
-*Consequence, and it is the load-bearing one:* moving money futures → Earn is **invisible** to the app,
-so it cannot be an exit. Value leaves the pool only when it lands in **another tracked account**
-(Bybit). One rule, no special cases — and it removes the silent-overpay trap where money pulled into
-Earn would still have been credited to the friends every month.
+The pooled money lives specifically in Binance's **futures** tab, and the user holds their own money
+*outside* it in the same Binance login. Those two facts cannot coexist under one whole-account pool.
+
+*Why the original decision had to go — it is an arithmetic error, not a preference.* Suppose futures
+holds 3,000 (1,000 each for the owner and two friends) and the owner has 2,000 of their own in spot,
+so Binance totals 5,000. Futures makes **+10% (+300)**:
+
+| | friend's stake after |
+|---|---:|
+| Whole-account pool: NAV × 5,300 ÷ 5,000 = 1.06 | **1,060** |
+| Correct — their 1,000 was in futures, which gained 10% | **1,100** |
+
+The owner's idle spot money **dilutes the friends' return from 10% to 6%**, underpaying each by 40 on
+that month; a losing month flips it and over-protects them. Worse, any spot buy or sell reprices their
+stake even though their money never touched spot.
+
+*Resolution:* the futures wallet becomes **its own app account** (`Binance Futures`), and the pool sits
+on that. The pre-existing `Binanance` account keeps the non-futures holdings and is not pooled.
+
+*Consequence, and it is the load-bearing one:* value leaves the pool when it lands in **another tracked
+account** — which now includes **futures → spot**, since `Binanance` is itself tracked. Under the old
+decision that transfer was invisible. This is stricter book-keeping and it is the price of the friends
+being paid on **futures** performance rather than on the whole Binance balance. Every futures ↔ spot
+movement of the owner's money is an owner subscription or redemption at NAV.
+
+> ✅ **BNB — checked against the new boundary and unaffected (confirmed 2026-09-07).** Narrowing the
+> pool to futures put the BNB rule in doubt: fee BNB held in *spot* would sit outside the pool, making
+> every futures fee paid from it an unrecorded subsidy from the owner to the friends. The user
+> confirmed the fee BNB is held **in the futures wallet**, so it is pool property and the original rule
+> stands untouched — include the BNB balance in the total typed at close, and record the fees nowhere,
+> because that snapshot already carries them. Had it been in spot, the fees would have needed either a
+> transfer into futures or an explicit cost-reimbursement each month.
 
 **The owner's profit and cost reimbursements stay in — the owner's share grows.** No transfer, no cash
 leg. The user withdraws to Bybit when they actually want value out, and that is an owner redemption at
@@ -996,9 +1046,15 @@ of this feature.**
 
 Friends bear losses pro-rata; high-water mark on via `capitalBase = Σ subscriptions − Σ redemptions`;
 no performance fee but server costs ARE shared; BNB fees recorded nowhere (already in the snapshot);
-pool = the whole Binance account, one typed number; value leaves the pool only into another tracked
-account (Bybit); owner's profit and cost recovery stay in and grow their share; reinvestment needs no
-code; close and pay are separate phases.
+**pool = the Binance FUTURES wallet as its own tracked account** (revised 2026-09-07 — it was
+originally the whole Binance login, which was wrong on the facts and would have underpaid the friends;
+see the boundary decision in §9); value leaves the pool when it lands in another tracked account,
+which now **includes futures → spot**; owner's profit and cost recovery stay in and grow their share;
+reinvestment needs no code; close and pay are separate phases.
+
+⚠️ The only item in this list that has ever been reopened is the pool boundary, and it was reopened
+because the user described the real arrangement more precisely — not because the reasoning changed.
+Everything else here was settled with the user directly.
 
 ### Still open — needs the user
 

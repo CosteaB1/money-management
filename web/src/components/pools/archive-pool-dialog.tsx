@@ -33,12 +33,13 @@ interface Props {
 /**
  * Confirms archiving a pool.
  *
- * Two things the copy has to land, because both are one-way:
+ * Two things the copy has to land:
  *
- * - **There is no unarchive.** Archiving is only permitted once nobody else
- *   holds a share, at which point the account is wholly owned again — so
- *   re-opening the pool would mean silently re-taking a claim on it. The
- *   backend exposes no route, deliberately.
+ * - **Archive is not delete.** It is the exit for a real pool that has run its
+ *   course: everything it recorded survives and the pool stays drillable. A
+ *   pool created by mistake is removed with `DeletePoolDialog` instead, and
+ *   the two must not read as flavours of the same button. Archiving is
+ *   reversible — an archived pool can be put back in service.
  *
  * - **It is refused while outside capital remains.** Letting it through would
  *   revert the owner fraction to 1.0 and quietly reabsorb the participants'
@@ -86,7 +87,8 @@ export function ArchivePoolDialog({ pool, open, onOpenChange }: Props) {
             every transaction it wrote stay intact, and the pool remains viewable on its own page.
             The account goes back to counting in full towards your net worth.
             <span className="mt-3 block">
-              This cannot be undone from the app — there is no unarchive for pools.
+              You can unarchive it later if you change your mind. To get rid of a pool you created
+              by mistake, delete it instead — archiving keeps everything it recorded.
             </span>
             {blocked && (
               <span

@@ -695,8 +695,14 @@ money**, so several conventions exist only here.
   badge** from `AccountDto.isPooled`, and the account keeps showing its **full** balance by explicit
   decision. The **Performance card on that page is owner-only**, and says so — otherwise it would book
   the friends' capital as the user's contributions and their payouts as the user's withdrawals.
-- **Archiving a pool is one-way** — there is no unarchive route, because archiving already requires
-  zero outside units.
+- **A pool has three exits, and the UI must not let them blur.** *Archive* winds down a real pool:
+  it needs zero outside units, keeps the ledger and roster, and stays drillable — and it is now
+  **reversible** via Unarchive, which re-arms every guard on the account. *Delete* is for a pool
+  created by mistake — one that never moved anyone's money — and removes it entirely; a pool that
+  has moved cash is refused with `pools.delete_has_movements`, surfaced inline as guidance to
+  archive instead rather than as a failure. **Deleting a pool never touches the account's
+  transactions**, including any balance adjustment the pool wrote, and the confirm says so — a
+  user assuming their balance rolls back would be badly wrong.
 
 **Known gap:** `unpaidDistributionCash` has no MDL equivalent on `PoolDto`, so the "Unpaid payouts"
 tile can only total across pools that share a currency; otherwise it renders "Multiple currencies".

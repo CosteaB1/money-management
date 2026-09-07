@@ -6,6 +6,7 @@ using MoneyManagement.Application.Features.Pools.AddPoolParticipant;
 using MoneyManagement.Application.Features.Pools.ArchivePool;
 using MoneyManagement.Application.Features.Pools.CloseDistribution;
 using MoneyManagement.Application.Features.Pools.CreatePool;
+using MoneyManagement.Application.Features.Pools.DeletePool;
 using MoneyManagement.Application.Features.Pools.DeletePoolEvent;
 using MoneyManagement.Application.Features.Pools.GetPoolDetail;
 using MoneyManagement.Application.Features.Pools.GetPools;
@@ -13,6 +14,7 @@ using MoneyManagement.Application.Features.Pools.RecordCostReimbursement;
 using MoneyManagement.Application.Features.Pools.RecordRedemption;
 using MoneyManagement.Application.Features.Pools.RecordSubscription;
 using MoneyManagement.Application.Features.Pools.SettleDistribution;
+using MoneyManagement.Application.Features.Pools.UnarchivePool;
 using MoneyManagement.SharedKernel;
 
 namespace MoneyManagement.Api.Features.Pools;
@@ -97,6 +99,8 @@ public sealed class PoolEndpoints : IEndpoint
         group.MapPost("/{id:guid}/cost-reimbursements", RecordCostReimbursement);
         group.MapDelete("/{id:guid}/events/{eventId:guid}", DeleteEvent);
         group.MapPost("/{id:guid}/archive", ArchivePool);
+        group.MapPost("/{id:guid}/unarchive", UnarchivePool);
+        group.MapDelete("/{id:guid}", DeletePool);
     }
 
     private static async Task<IResult> GetPools(
@@ -274,6 +278,46 @@ public sealed class PoolEndpoints : IEndpoint
         CancellationToken cancellationToken)
     {
         Result result = await handler.Handle(new ArchivePoolCommand(id), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : result.ToProblemDetails();
+    }
+
+    /// <summary>
+    /// Puts an archived pool back in service. Idempotent, and touches no money -
+    /// see <see cref="UnarchivePoolCommand"/> for why the archive-side
+    /// outside-units check has no mirror here.
+    /// </summary>
+    private static async Task<IResult> UnarchivePool(
+        Guid id,
+        ICommandHandler<UnarchivePoolCommand> handler,
+        CancellationToken cancellationToken)
+    {
+        Result result = await handler.Handle(new UnarchivePoolCommand(id), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : result.ToProblemDetails();
+    }
+
+    /// <summary>
+    /// Hard-deletes a pool created by mistake, with its participants and unit
+    /// events. Archived pools included - those are the stuck ones.
+    /// <para>
+    /// <b>409 <c>pools.delete_has_movements</c></b> the moment the pool holds
+    /// non-owner units or carries an event with cash or a linked transaction:
+    /// that ledger records real money and is wound down by redeeming and
+    /// archiving, never deleted. Only "a seed and nothing else" qualifies.
+    /// </para>
+    /// <para>
+    /// <b>204 does NOT mean the account's history was rolled back.</b> A pool's
+    /// catch-up mark is a real adjustment row that moved the balance to what the
+    /// exchange was actually showing, and may have been reconciled against, so
+    /// it deliberately survives the pool. Delete it from the transactions page
+    /// if it was itself wrong.
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> DeletePool(
+        Guid id,
+        ICommandHandler<DeletePoolCommand> handler,
+        CancellationToken cancellationToken)
+    {
+        Result result = await handler.Handle(new DeletePoolCommand(id), cancellationToken);
         return result.IsSuccess ? Results.NoContent() : result.ToProblemDetails();
     }
 }

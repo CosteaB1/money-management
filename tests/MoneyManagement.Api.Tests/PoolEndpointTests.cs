@@ -320,6 +320,143 @@ public sealed class PoolEndpointTests(CustomWebApplicationFactory factory) : IAs
         archived.StatusCode.Should().Be(HttpStatusCode.NoContent);
     }
 
+    // ---- delete + unarchive ------------------------------------------------
+
+    /// <summary>
+    /// The reported dead end, end to end: a pool created by mistake (one seed,
+    /// one owner, no cash, no mark) that was archived and could then never be
+    /// removed - and whose archived row made its account permanently
+    /// undeletable, because <c>pools.account_id</c> is <c>ON DELETE RESTRICT</c>.
+    /// <para>
+    /// This is also the test that proves the handler's <c>IgnoreQueryFilters()</c>
+    /// is load-bearing: the Application suite's fake context has no query filter,
+    /// so only here does the archived row actually have to be found.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Delete_pool_that_never_moved_money_returns_204_and_frees_its_account()
+    {
+        (Guid accountId, Guid poolId, _) = await CreatePoolAsync(openingBalance: 1_200m, inceptionValue: 1_200m);
+
+        HttpResponseMessage archived = await Client.PostAsync($"/pools/{poolId}/archive", null);
+        archived.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        // Blocked while the pool exists, archived or not.
+        HttpResponseMessage blockedAccount = await Client.DeleteAsync($"/accounts/{accountId}/permanent");
+        blockedAccount.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        using (JsonDocument problem = await _fx.ReadDocAsync(blockedAccount))
+        {
+            problem.RootElement.GetProperty("errorCode").GetString().Should().Be("account.has_linked_records");
+        }
+
+        HttpResponseMessage deleted = await Client.DeleteAsync($"/pools/{poolId}");
+        deleted.StatusCode.Should().Be(HttpStatusCode.NoContent, await deleted.Content.ReadAsStringAsync());
+
+        (await Client.GetAsync($"/pools/{poolId}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+            (await db.Pools.IgnoreQueryFilters().AnyAsync(p => p.Id == poolId)).Should().BeFalse();
+            (await db.PoolParticipants.AnyAsync(p => p.PoolId == poolId)).Should().BeFalse();
+            (await db.PoolUnitEvents.AnyAsync(e => e.PoolId == poolId)).Should().BeFalse();
+
+            // A zero-delta inception mark is skipped, not written, and a seed
+            // carries no cash leg - so this account never had a row, and the
+            // delete did not invent or destroy one.
+            (await db.Transactions.IgnoreQueryFilters().AnyAsync(t => t.AccountId == accountId))
+                .Should().BeFalse();
+        }
+
+        // The point of the whole exercise: the account is reachable again.
+        HttpResponseMessage freedAccount = await Client.DeleteAsync($"/accounts/{accountId}/permanent");
+        freedAccount.StatusCode.Should().Be(
+            HttpStatusCode.NoContent,
+            await freedAccount.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Delete_pool_that_holds_outside_units_returns_409()
+    {
+        (_, Guid poolId, _) = await CreatePoolAsync(openingBalance: 1_200m, inceptionValue: 1_200m);
+        Guid participantId = await AddParticipantAsync(poolId, "Andrei");
+
+        HttpResponseMessage subscribe = await Client.PostAsJsonAsync($"/pools/{poolId}/subscriptions", new
+        {
+            participantId,
+            poolValueNow = 1_200m,
+            cash = 800m,
+            notes = (string?)null,
+        });
+
+        subscribe.StatusCode.Should().Be(HttpStatusCode.Created, await subscribe.Content.ReadAsStringAsync());
+
+        HttpResponseMessage refused = await Client.DeleteAsync($"/pools/{poolId}");
+
+        // 409, not 400: this is a state conflict of the AccountErrors
+        // .HasLinkedRecords family - "you cannot delete this, archive it".
+        refused.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        using JsonDocument problem = await _fx.ReadDocAsync(refused);
+        problem.RootElement.GetProperty("errorCode").GetString().Should().Be("pools.delete_has_movements");
+
+        (await Client.GetAsync($"/pools/{poolId}")).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Delete_pool_for_an_unknown_id_returns_404()
+    {
+        HttpResponseMessage response = await Client.DeleteAsync($"/pools/{Guid.NewGuid()}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        using JsonDocument problem = await _fx.ReadDocAsync(response);
+        problem.RootElement.GetProperty("errorCode").GetString().Should().Be("pools.not_found");
+    }
+
+    /// <summary>
+    /// Archiving used to be a one-way door, and a locked one: one pool per
+    /// account is enforced forever by a unique index that deliberately does NOT
+    /// filter on <c>is_archived</c>, so a mis-click left the account unable to
+    /// have a pool at all.
+    /// </summary>
+    [Fact]
+    public async Task Unarchive_puts_the_pool_back_in_the_list_and_is_idempotent()
+    {
+        (_, Guid poolId, _) = await CreatePoolAsync(openingBalance: 1_200m, inceptionValue: 1_200m);
+
+        (await Client.PostAsync($"/pools/{poolId}/archive", null))
+            .StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        using (JsonDocument list = await _fx.ReadDocAsync(await Client.GetAsync("/pools")))
+        {
+            JsonElement[] listed = [.. list.RootElement.EnumerateArray()];
+            listed.Should().NotContain(p => p.GetProperty("id").GetGuid() == poolId);
+        }
+
+        HttpResponseMessage unarchived = await Client.PostAsync($"/pools/{poolId}/unarchive", null);
+        unarchived.StatusCode.Should().Be(HttpStatusCode.NoContent, await unarchived.Content.ReadAsStringAsync());
+
+        using (JsonDocument list = await _fx.ReadDocAsync(await Client.GetAsync("/pools")))
+        {
+            JsonElement[] listed = [.. list.RootElement.EnumerateArray()];
+            listed.Should().Contain(p => p.GetProperty("id").GetGuid() == poolId);
+        }
+
+        // Idempotent on an already-active pool - the archive contract, backwards.
+        (await Client.PostAsync($"/pools/{poolId}/unarchive", null))
+            .StatusCode.Should().Be(HttpStatusCode.NoContent);
+    }
+
+    [Fact]
+    public async Task Unarchive_for_an_unknown_id_returns_404()
+    {
+        HttpResponseMessage response = await Client.PostAsync($"/pools/{Guid.NewGuid()}/unarchive", null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        using JsonDocument problem = await _fx.ReadDocAsync(response);
+        problem.RootElement.GetProperty("errorCode").GetString().Should().Be("pools.not_found");
+    }
+
     // ---- the two read routes ---------------------------------------------
 
     [Fact]

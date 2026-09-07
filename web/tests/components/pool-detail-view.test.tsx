@@ -3,12 +3,17 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import type { ReactElement } from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PoolDetailView } from '@/src/components/pools/detail/pool-detail-view';
 import { Toaster } from '@/src/components/ui/sonner';
 import { server } from '@/src/lib/mocks/server';
 import { formatMoney } from '@/src/lib/utils/currency';
 import type { PoolDetailDto } from '@/src/types/api';
+
+// The header pushes back to /pools after a delete. jsdom has no App-Router
+// context, so `useRouter` needs a stub — same treatment the account and loan
+// detail suites use.
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 const POOL_ID = 'aaaa0001-0000-4000-8000-000000000001';
 const ARCHIVED_POOL_ID = 'aaaa0001-0000-4000-8000-000000000002';
@@ -70,11 +75,15 @@ describe('PoolDetailView — layout and states', () => {
     expect(screen.getByText('Failed to load pool.')).toBeInTheDocument();
   });
 
-  it('stays drillable when archived but drops every mutating action', async () => {
+  it('stays drillable when archived but drops every money-moving action', async () => {
     renderWithClient(<PoolDetailView id={ARCHIVED_POOL_ID} />);
     await waitFor(() => expect(screen.getByTestId('pool-detail-archived')).toBeInTheDocument());
-    expect(screen.queryByTestId('pool-detail-actions')).not.toBeInTheDocument();
     expect(screen.queryByTestId('pool-detail-close-month')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pool-detail-record-subscription')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pool-detail-archive')).not.toBeInTheDocument();
+    // What replaces them: the two lifecycle actions.
+    expect(screen.getByTestId('pool-detail-unarchive')).toBeInTheDocument();
+    expect(screen.getByTestId('pool-detail-delete')).toBeInTheDocument();
   });
 });
 

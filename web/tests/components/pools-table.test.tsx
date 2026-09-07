@@ -118,14 +118,33 @@ describe('PoolsTable', () => {
     expect(screen.getByTestId('pool-archived-badge')).toBeInTheDocument();
   });
 
-  it('offers no row menu on an archived pool — archiving is one-way', async () => {
+  it('collapses an archived row to Unarchive + Delete, with no Archive', async () => {
     const user = userEvent.setup();
     renderWithClient(<PoolsTable />);
     await user.click(screen.getByTestId('show-archived-pools-toggle'));
     await waitFor(() => expect(screen.getAllByTestId('pool-row').length).toBe(2));
 
-    // One menu across two rows: the live one has it, the archived one doesn't.
-    expect(screen.getAllByTestId('pool-actions').length).toBe(1);
+    const archivedRow = screen
+      .getAllByTestId('pool-row')
+      .find((row) => row.getAttribute('data-archived') === 'true');
+    if (!archivedRow) throw new Error('expected an archived row');
+
+    await user.click(within(archivedRow).getByTestId('pool-actions'));
+    expect(await screen.findByTestId('unarchive-pool-action')).toBeInTheDocument();
+    expect(screen.getByTestId('delete-pool-action')).toBeInTheDocument();
+    // Archiving an archived pool is a no-op the menu should never offer.
+    expect(screen.queryByTestId('archive-pool-action')).not.toBeInTheDocument();
+  });
+
+  it('offers Archive (not Unarchive) on an active row', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<PoolsTable />);
+    await waitFor(() => expect(screen.getAllByTestId('pool-actions').length).toBe(1));
+
+    await user.click(screen.getByTestId('pool-actions'));
+    expect(await screen.findByTestId('archive-pool-action')).toBeInTheDocument();
+    expect(screen.getByTestId('delete-pool-action')).toBeInTheDocument();
+    expect(screen.queryByTestId('unarchive-pool-action')).not.toBeInTheDocument();
   });
 
   it('opens then closes the Archive dialog from the row menu', async () => {

@@ -1566,6 +1566,10 @@ export const handlers = [
   }),
   http.delete('*/pools/:id/events/:eventId', () => new HttpResponse(null, { status: 204 })),
   http.post('*/pools/:id/archive', () => new HttpResponse(null, { status: 204 })),
+  http.post('*/pools/:id/unarchive', () => new HttpResponse(null, { status: 204 })),
+  // Hard delete. The happy default is the "created by mistake" pool; suites
+  // that need the 409 (`pools.delete_has_movements`) or a 404 override it.
+  http.delete('*/pools/:id', () => new HttpResponse(null, { status: 204 })),
   http.get('*/fx-rates', ({ request }) => {
     const url = new URL(request.url);
     const page = Number(url.searchParams.get('page') ?? '1');

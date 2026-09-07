@@ -319,6 +319,28 @@ public static class PoolErrors
             "pools.seed_cannot_be_deleted",
             "A pool's seed event cannot be deleted - archive the pool instead.");
 
+    /// <summary>
+    /// <c>DELETE /pools/{id}</c> refused. The pool either issued units to
+    /// somebody else, or carries an event that moved cash - in both cases the
+    /// ledger is a record of real money and a hard delete would erase it.
+    /// <para>
+    /// The complement is deliberately narrow: a pool with a seed and NOTHING
+    /// else provably holds nobody else's money (there are no outside units) and
+    /// provably moved none (no event carries cash or a transaction), which is
+    /// exactly the "created by mistake" shape. Anything past that is wound down
+    /// by redeeming and archiving, not deleted.
+    /// </para>
+    /// <para>
+    /// Phrased like <c>AccountErrors.HasLinkedRecords</c> - the same "you cannot
+    /// delete this, archive it" contract, one level down.
+    /// </para>
+    /// </summary>
+    public static readonly Error DeleteHasMovements =
+        Error.Conflict(
+            "pools.delete_has_movements",
+            "This pool holds units for someone other than the owner, or has events that moved cash, so it "
+            + "can't be deleted - only a pool that was never used (a seed and nothing else) can. Archive it instead.");
+
     // ---- Guard table -----------------------------------------------------
     //
     // "Pooled" means a NON-ARCHIVED pool exists for the account (archiving

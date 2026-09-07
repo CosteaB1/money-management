@@ -9,11 +9,13 @@ using MoneyManagement.Application.Features.Pools.AddPoolParticipant;
 using MoneyManagement.Application.Features.Pools.ArchivePool;
 using MoneyManagement.Application.Features.Pools.CloseDistribution;
 using MoneyManagement.Application.Features.Pools.CreatePool;
+using MoneyManagement.Application.Features.Pools.DeletePool;
 using MoneyManagement.Application.Features.Pools.DeletePoolEvent;
 using MoneyManagement.Application.Features.Pools.RecordCostReimbursement;
 using MoneyManagement.Application.Features.Pools.RecordRedemption;
 using MoneyManagement.Application.Features.Pools.RecordSubscription;
 using MoneyManagement.Application.Features.Pools.SettleDistribution;
+using MoneyManagement.Application.Features.Pools.UnarchivePool;
 using MoneyManagement.Domain.Accounts;
 using MoneyManagement.Domain.Common;
 using MoneyManagement.Domain.Pools;
@@ -219,6 +221,20 @@ internal sealed class PoolHarness
 
     public Task<Result> ArchivePoolAsync() =>
         new ArchivePoolCommandHandler(Db).Handle(new ArchivePoolCommand(PoolId), CancellationToken.None);
+
+    public Task<Result> UnarchivePoolAsync(Guid? poolId = null) =>
+        new UnarchivePoolCommandHandler(Db).Handle(
+            new UnarchivePoolCommand(poolId ?? PoolId),
+            CancellationToken.None);
+
+    /// <param name="poolId">
+    /// Overridable so the unknown-id case can be driven through the same seam
+    /// the real route uses.
+    /// </param>
+    public Task<Result> DeletePoolAsync(Guid? poolId = null) =>
+        new DeletePoolCommandHandler(Db).Handle(
+            new DeletePoolCommand(poolId ?? PoolId),
+            CancellationToken.None);
 
     /// <summary>
     /// Folds the pool exactly the way the read slice and the ownership source

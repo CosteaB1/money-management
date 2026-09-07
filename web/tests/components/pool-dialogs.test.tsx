@@ -690,11 +690,11 @@ describe('AddParticipantDialog', () => {
 describe('ArchivePoolDialog', () => {
   const archivable = { id: POOL_ID, name: 'Binance pool', currency: 'USD', outsideCapital: 0 };
 
-  it('warns that archiving cannot be undone', () => {
+  it('keeps itself apart from Delete: history survives, and it is reversible', () => {
     renderWithClient(<ArchivePoolDialog pool={archivable} open onOpenChange={noop} />);
-    expect(screen.getByTestId('archive-pool-dialog')).toHaveTextContent(
-      /there is no unarchive for pools/i,
-    );
+    const dialog = screen.getByTestId('archive-pool-dialog');
+    expect(dialog).toHaveTextContent(/you can unarchive it later/i);
+    expect(dialog).toHaveTextContent(/pool you created by mistake, delete it instead/i);
   });
 
   it('blocks the button while other people still hold money in the pool', () => {

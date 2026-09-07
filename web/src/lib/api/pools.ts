@@ -204,17 +204,62 @@ export function useDeletePoolEvent(poolId: string) {
  * fraction would revert to 1.0 and the outside stake would be silently
  * reabsorbed.
  *
- * There is deliberately **no unarchive route**: archiving is only reachable
- * once nobody else holds a claim, so the account is wholly owned again and
- * `isPooled` flips off for good.
- *
  * Archiving flips `isPooled` on the account and restores its full balance to
  * net worth, so this is not a metadata-only change — the wide set applies.
+ *
+ * Reversible via {@link useUnarchivePool}. It is **not** the way to get rid of
+ * a pool created by mistake — that is {@link useDeletePool}.
  */
 export function useArchivePool() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => apiClient.post<void>(`/pools/${id}/archive`),
+    onSuccess: () => invalidatePoolMovement(queryClient),
+  });
+}
+
+/**
+ * Puts an archived pool back in service (POST /pools/{id}/unarchive → 204,
+ * idempotent). The mirror of `useArchivePool`, and it needs no mirror of that
+ * route's outside-units check: the direction of travel is towards **more**
+ * restriction, because an active pool re-arms every guard on the account
+ * (manual transactions, transfers, imports and loan movements are refused
+ * again).
+ *
+ * Same wide invalidation as archive — `isPooled` flips back on and the
+ * net-worth seam re-reads the account through the owner fraction.
+ */
+export function useUnarchivePool() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.post<void>(`/pools/${id}/unarchive`),
+    onSuccess: () => invalidatePoolMovement(queryClient),
+  });
+}
+
+/**
+ * Hard-deletes a pool with its participants and unit events
+ * (DELETE /pools/{id} → 204). Works on archived rows too — those are the stuck
+ * ones, since an archived pool still holds its account through the `RESTRICT`
+ * FK and the unfiltered unique index on `account_id`.
+ *
+ * Refused with **409 `pools.delete_has_movements`** the moment the pool holds
+ * non-owner units or carries an event with cash or a linked transaction. That
+ * is the ordinary answer for a pool that has been used, not a failure: such a
+ * pool is wound down by redeeming and archiving. Callers surface it as
+ * guidance — see `DeletePoolDialog`.
+ *
+ * **A 204 does not roll the account's history back.** The pool's catch-up
+ * marks stay: they are real adjustment rows that moved the balance to what the
+ * exchange was showing and may already have been reconciled against. Nothing
+ * on the transactions side changes here — the wide set still applies because
+ * `isPooled` flips off and the net-worth seam stops applying an owner fraction
+ * to the account.
+ */
+export function useDeletePool() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.delete<void>(`/pools/${id}`),
     onSuccess: () => invalidatePoolMovement(queryClient),
   });
 }

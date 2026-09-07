@@ -12,6 +12,24 @@ namespace MoneyManagement.Application.Features.Accounts.DeleteAccount;
 /// transaction (as the primary or counter account), import batch, savings goal
 /// or capital pool blocks the delete with a 409 Conflict so the user archives
 /// instead.
+/// <para>
+/// <b>An ARCHIVED pool still counts, on purpose.</b> The tempting fix for "an
+/// archived pool blocks this forever" is to stop counting archived pools — and
+/// it is wrong: <c>pools.account_id</c> is <c>ON DELETE RESTRICT</c> and the row
+/// survives archiving, so skipping the check does not make the account
+/// deletable, it just trades this 409 for the unhandled 500 the pre-check was
+/// added to prevent. The pre-check has to mirror the FK exactly.
+/// </para>
+/// <para>
+/// The escape hatch is <c>DELETE /pools/{id}</c> instead: it removes a pool that
+/// never moved money (a seed and nothing else — the created-by-mistake shape),
+/// after which this handler sees no pool and the delete goes through. A pool
+/// that DID move money is not a life sentence either — its events are deletable
+/// one by one down to the seed — but the transactions those events wrote survive
+/// as (soft-deleted) rows, and they block the delete on their own merits, which
+/// is the same answer any account with history gets. "Permanently deletable" has
+/// always meant "never used".
+/// </para>
 /// </summary>
 internal sealed class DeleteAccountCommandHandler(IApplicationDbContext db)
     : ICommandHandler<DeleteAccountCommand>
@@ -49,8 +67,12 @@ internal sealed class DeleteAccountCommandHandler(IApplicationDbContext db)
         // the seed carries no cash leg by design. Without this pre-check such an
         // account sails past the three checks above and dies on
         // fk_pools_accounts_account_id as an unhandled 500 with no errorCode,
-        // where the user needed "this account holds a pool, archive it instead".
-        // IgnoreQueryFilters: an archived pool still holds the FK.
+        // where the user needed a 409 it could act on.
+        //
+        // IgnoreQueryFilters: an archived pool still holds the FK, so it still
+        // has to block - see the type remarks for why NOT counting archived
+        // pools would swap this 409 for that 500 rather than unblocking
+        // anything. The way out is DELETE /pools/{id}.
         bool hasPool = await db.Pools
             .IgnoreQueryFilters()
             .AnyAsync(p => p.AccountId == command.Id, cancellationToken);

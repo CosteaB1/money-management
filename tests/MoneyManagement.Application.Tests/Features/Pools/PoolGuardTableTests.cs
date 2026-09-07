@@ -641,6 +641,77 @@ public class PoolGuardTableTests
         harness.Db.PoolUnitEvents.Should().BeEmpty();
     }
 
+    // ---- DeletePool -------------------------------------------------------
+    //
+    // DELETE /pools/{id} is the escape hatch for a pool created BY MISTAKE, and
+    // it is the narrowest door in the slice: allowed only when the pool cannot
+    // possibly hold anyone else's money (no non-owner units) and provably never
+    // moved any (no event with cash or a linked transaction). Everything else is
+    // a ledger of real money, wound down by redeeming and archiving. One error
+    // code covers both refusals - the remedy is the same either way.
+
+    [Fact]
+    public async Task DeletePool_WhileANonOwnerHoldsUnits_IsBlocked()
+    {
+        PoolHarness harness = await PooledAsync();
+        Guid andrei = await harness.AddParticipantAsync("Andrei");
+        (await harness.SubscribeAsync(andrei, 1_200m, 800m)).IsSuccess.Should().BeTrue();
+
+        Result result = await harness.DeletePoolAsync();
+
+        // Same count Pool.Archive is judged on, so "deletable" can never be
+        // laxer than "archivable" on the only question that matters: is any of
+        // this somebody else's?
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("pools.delete_has_movements");
+        harness.Db.Pools.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task DeletePool_WhenAUnitEventCarriesCash_IsBlocked()
+    {
+        // A CLOSED but unpaid distribution: cash on the event, no transaction
+        // yet. The units-side guard is silent here (the owner is the only
+        // participant), so this isolates the cash test.
+        PoolHarness harness = await PooledAsync();
+
+        Result<CloseDistributionResponse> close =
+            await harness.CloseAsync(1_400m, [new DistributionPayout(harness.OwnerId, 100m)]);
+
+        close.IsSuccess.Should().BeTrue(close.IsFailure ? close.Error.Code : null);
+
+        PoolUnitEvent payout = (await harness.Db.PoolUnitEvents.ToListAsync())
+            .Single(e => e.Kind == PoolUnitEventKind.Distribution);
+
+        payout.Cash.Should().NotBeNull();
+        payout.MovementTransactionId.Should().BeNull("an unpaid distribution has no money row yet");
+
+        Result result = await harness.DeletePoolAsync();
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("pools.delete_has_movements");
+    }
+
+    [Fact]
+    public async Task DeletePool_WhenAUnitEventLinksAMovementTransaction_IsBlocked()
+    {
+        // The owner's own subscription: outside units are still zero, but the
+        // event is the bookkeeping half of a real transaction on the account.
+        // Deleting the pool would strand that row's explanation.
+        PoolHarness harness = await PooledAsync();
+
+        Result<RecordSubscriptionResponse> subscription =
+            await harness.SubscribeAsync(harness.OwnerId, 1_200m, 300m);
+
+        subscription.IsSuccess.Should().BeTrue(subscription.IsFailure ? subscription.Error.Code : null);
+        subscription.Value.MovementTransactionId.Should().NotBeEmpty();
+
+        Result result = await harness.DeletePoolAsync();
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("pools.delete_has_movements");
+    }
+
     // ---- DeleteAccount ----------------------------------------------------
 
     [Fact]
@@ -665,6 +736,47 @@ public class PoolGuardTableTests
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("account.has_linked_records");
         harness.Db.Accounts.Should().Contain(harness.Account);
+    }
+
+    [Fact]
+    public async Task DeleteAccount_HoldingAnARCHIVEDPool_IsStillBlocked()
+    {
+        PoolHarness harness = await PooledAsync();
+        (await harness.ArchivePoolAsync()).IsSuccess.Should().BeTrue();
+
+        var handler = new DeleteAccountCommandHandler(harness.Db);
+
+        Result result = await handler.Handle(
+            new DeleteAccountCommand(harness.Account.Id),
+            CancellationToken.None);
+
+        // DECIDED, not an oversight. Archiving releases the account from every
+        // OTHER guard - but pools.account_id is ON DELETE RESTRICT and the row
+        // is still there, so dropping archived pools from this check would not
+        // make the account deletable, it would just swap this 409 for the
+        // unhandled 500 the pre-check exists to prevent. The way out is to
+        // delete the pool (below), not to stop counting it.
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("account.has_linked_records");
+    }
+
+    [Fact]
+    public async Task DeleteAccount_AfterTheMistakenPoolIsDeleted_Succeeds()
+    {
+        PoolHarness harness = await PooledAsync();
+        (await harness.ArchivePoolAsync()).IsSuccess.Should().BeTrue();
+        (await harness.DeletePoolAsync()).IsSuccess.Should().BeTrue();
+
+        var handler = new DeleteAccountCommandHandler(harness.Db);
+
+        Result result = await handler.Handle(
+            new DeleteAccountCommand(harness.Account.Id),
+            CancellationToken.None);
+
+        // The guarantee behind the decision above: a pool is never a permanent
+        // life sentence on its account, because there is always a route to a
+        // state where the account is deletable.
+        result.IsSuccess.Should().BeTrue(result.IsFailure ? result.Error.Code : null);
     }
 
     // ---- Archived pools release the account -------------------------------
@@ -743,6 +855,7 @@ public class PoolGuardTableTests
             PoolErrors.CashLooksLikeABalance,
             PoolErrors.DestinationRequiresOwner,
             PoolErrors.GoalLinkBlocked,
+            PoolErrors.DeleteHasMovements,
         ];
 
         guards.Select(e => e.Code).Should().OnlyHaveUniqueItems();

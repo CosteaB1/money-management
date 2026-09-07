@@ -9,15 +9,19 @@ import {
   UserPlus,
 } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { AddParticipantDialog } from '@/src/components/pools/add-participant-dialog';
 import { ArchivePoolDialog } from '@/src/components/pools/archive-pool-dialog';
 import { CloseMonthDialog } from '@/src/components/pools/close-month-dialog';
+import { DeletePoolDialog } from '@/src/components/pools/delete-pool-dialog';
 import { RecordCostReimbursementDialog } from '@/src/components/pools/record-cost-reimbursement-dialog';
 import { RecordRedemptionDialog } from '@/src/components/pools/record-redemption-dialog';
 import { RecordSubscriptionDialog } from '@/src/components/pools/record-subscription-dialog';
 import { Badge } from '@/src/components/ui/badge';
 import { Button } from '@/src/components/ui/button';
+import { useUnarchivePool } from '@/src/lib/api/pools';
 import { formatShortDate } from '@/src/lib/utils/date';
 import type { PoolDetailDto } from '@/src/types/api';
 
@@ -29,22 +33,34 @@ interface Props {
  * Top strip of the detail page: back link, name, account link, currency and
  * archived badges, the inception subtitle, and the action group.
  *
- * Archived pools stay drillable — the loans and goals detail precedent — but
- * every mutating action disappears. There is no Unarchive button to put in
- * their place either: the backend has no such route, because archiving is only
- * permitted once nobody else holds a share, and re-opening would mean silently
- * re-taking a claim on an account that is wholly the user's again.
+ * Archived pools stay drillable — the loans and goals detail precedent — and
+ * every money-moving action disappears while archived, replaced by the two
+ * lifecycle actions that still make sense: **Unarchive** (put it back in
+ * service) and **Delete** (it should never have existed). Mirrors the loan and
+ * account detail headers.
  *
  * All the money-moving dialogs live here rather than on the list page: each of
  * them needs the participant roster, which only the detail endpoint returns.
  */
 export function PoolDetailHeader({ pool }: Props) {
+  const router = useRouter();
+  const unarchive = useUnarchivePool();
   const [subscribeOpen, setSubscribeOpen] = useState(false);
   const [redeemOpen, setRedeemOpen] = useState(false);
   const [closeOpen, setCloseOpen] = useState(false);
   const [costOpen, setCostOpen] = useState(false);
   const [participantOpen, setParticipantOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
+  const handleUnarchive = async () => {
+    try {
+      await unarchive.mutateAsync(pool.id);
+      toast.success(`Unarchived "${pool.name}"`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to unarchive pool');
+    }
+  };
 
   return (
     <div className="space-y-4" data-testid="pool-detail-header">
@@ -86,6 +102,17 @@ export function PoolDetailHeader({ pool }: Props) {
             </Link>{' '}
             · started {formatShortDate(pool.inceptionDate)}
           </p>
+          {/* Unarchiving is not a cosmetic flip: an active pool re-arms every
+              guard on the account, so say what comes back before the button is
+              pressed rather than after the next refusal. */}
+          {pool.isArchived && (
+            <p className="text-sm text-muted-foreground" data-testid="pool-detail-unarchive-note">
+              Unarchiving puts this pool back in service and re-arms the guards on{' '}
+              <strong>{pool.accountName}</strong>: manual transactions, transfers, imports and loan
+              movements on that account are blocked again, and every movement has to go through the
+              pool.
+            </p>
+          )}
         </div>
 
         {!pool.isArchived && (
@@ -143,6 +170,40 @@ export function PoolDetailHeader({ pool }: Props) {
             >
               Archive
             </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setDeleteOpen(true)}
+              className="text-destructive hover:text-destructive"
+              data-testid="pool-detail-delete"
+            >
+              Delete
+            </Button>
+          </div>
+        )}
+
+        {/* An archived pool swaps the whole group for the two lifecycle
+            actions — mirrors the loan and account detail headers. */}
+        {pool.isArchived && (
+          <div className="flex flex-wrap items-center gap-2" data-testid="pool-detail-actions">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleUnarchive}
+              disabled={unarchive.isPending}
+              data-testid="pool-detail-unarchive"
+            >
+              Unarchive
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setDeleteOpen(true)}
+              className="text-destructive hover:text-destructive"
+              data-testid="pool-detail-delete"
+            >
+              Delete
+            </Button>
           </div>
         )}
       </div>
@@ -175,6 +236,25 @@ export function PoolDetailHeader({ pool }: Props) {
           />
         </>
       )}
+
+      {/* Reachable in both states — an archived pool is precisely the one that
+          gets stuck, since it goes on holding its account through the
+          restricting FK. */}
+      <DeletePoolDialog
+        pool={{
+          id: pool.id,
+          name: pool.name,
+          accountName: pool.accountName,
+          currency: pool.currency,
+          outsideCapital: pool.outsideCapital,
+          isArchived: pool.isArchived,
+        }}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        // The pool no longer exists on success — this page is now dead.
+        onDeleted={() => router.push('/pools')}
+        onArchiveInstead={() => setArchiveOpen(true)}
+      />
     </div>
   );
 }
